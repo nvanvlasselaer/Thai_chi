@@ -4,18 +4,11 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
 from scipy.spatial.transform import Rotation
+from scipy.signal import butter, sosfiltfilt
 
-# Define segment properties: (parent_joint, sensor_name, neutral_vector_xyz)
-#
-# Root is 'pelvis_center' at (0,0,0) with identity rotation.
-#
-# sensor_name may be None for joints that are rigid offsets of their parent
-# (no additional local rotation). In that case the parent's world rotation is
-# inherited directly and only the neutral_vector offset is applied.
-#
-# IMPORTANT: entries MUST appear after their parent in this dict so that the
-# forward-kinematics traversal always finds a parent's world rotation before
-# computing a child's. Topological order is verified at runtime.
+# ----------------------------------------------------------------------
+# Skeleton definition
+# ----------------------------------------------------------------------
 SEGMENTS = {
     # ── Pelvis hips (rigid offsets from pelvis_center; lumbar drives both) ──
     "pelvis_right":   ("pelvis_center", "lumbar",    [ 0.12,  0,     0   ]),
@@ -62,33 +55,97 @@ def _verify_topological_order(segments: dict) -> None:
             )
         seen.add(joint)
 
-# Validate once at import time so any reordering mistake is caught immediately.
 _verify_topological_order(SEGMENTS)
 
 
-def load_kinematics(npz_path):
+# ----------------------------------------------------------------------
+# Quaternion filtering (zero‑phase high‑pass)
+# ----------------------------------------------------------------------
+def highpass_quat_sos(time_s, quat_wxyz, cutoff=0.05, order=4):
+    """
+    Zero‑phase high‑pass filter a quaternion time series (N x 4, wxyz order).
+
+    Filtering is applied in the rotation‑vector domain to preserve valid
+    orientations after re‑normalisation.
+
+    Parameters
+    ----------
+    time_s : (N,) array, monotonically increasing time stamps.
+    quat_wxyz : (N,4) array, quaternions as [w, x, y, z].
+    cutoff : float, high‑pass cutoff frequency in Hz.
+    order : int, Butterworth filter order (effective order doubled by sosfiltfilt).
+
+    Returns
+    -------
+    filtered_wxyz : (N,4) array.
+    """
+    # Sampling rate
+    fs = 1.0 / np.median(np.diff(time_s))
+    nyq = 0.5 * fs
+    Wn = cutoff / nyq
+
+    # Design high‑pass Butterworth filter (SOS form)
+    sos = butter(order, Wn, btype='high', output='sos')
+
+    # Convert to rotation vectors (N x 3)
+    # scipy expects (x, y, z, w) order internally
+    rotvec = Rotation.from_quat(quat_wxyz[:, [1, 2, 3, 0]]).as_rotvec()
+
+    # Padding to reduce filter transient at edges
+    padlen = 3 * len(sos) * 4   # generous symmetric padding
+    rv_padded = np.pad(rotvec, ((padlen, padlen), (0, 0)), mode='reflect')
+    rv_filt_padded = sosfiltfilt(sos, rv_padded, axis=0)
+    rv_filt = rv_filt_padded[padlen:-padlen, :]
+
+    # Back to quaternions (xyzw), then reorder to wxyz
+    quat_xyzw = Rotation.from_rotvec(rv_filt).as_quat()   # [x, y, z, w]
+    quat_wxyz = np.column_stack([quat_xyzw[:, 3], quat_xyzw[:, :3]])
+    return quat_wxyz
+
+
+# ----------------------------------------------------------------------
+# Data loading
+# ----------------------------------------------------------------------
+def load_kinematics(npz_path, filter_hp=False, hp_cutoff=0.05, hp_order=4):
+    """
+    Load IMU orientations from an .npz file and optionally high‑pass filter them.
+
+    Returns
+    -------
+    time_s : (N,) array
+    quats : dict {sensor_name: (N,4) array of quaternions in wxyz order}
+    """
     data = np.load(npz_path)
     time_s = data["time_s"]
+
     quats = {}
     for k in data.files:
         if k.endswith("_q_wxyz"):
             sensor = k.replace("_q_wxyz", "")
-            quats[sensor] = data[k]
+            q = data[k]   # (N, 4)
+            if filter_hp:
+                print(f"  High‑pass filtering sensor '{sensor}' ...")
+                q = highpass_quat_sos(time_s, q, cutoff=hp_cutoff, order=hp_order)
+            quats[sensor] = q
+
+    if filter_hp:
+        # Warn about possible edge transients
+        edge_sec = 1.0  # rough estimate
+        print(f"  Note: filter transients may affect ~{edge_sec} s at start/end.")
+
     return time_s, quats
 
 
+# ----------------------------------------------------------------------
+# Forward kinematics
+# ----------------------------------------------------------------------
 def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
     """
-    Forward kinematics with accumulated rotations.
+    Compute joint world positions for a single frame using accumulated rotations.
 
-    For every joint the world rotation is:
-        world_rot[joint] = world_rot[parent] * local_rot[sensor]
-
-    When sensor is None the joint is a rigid offset: it simply inherits the
-    parent's world rotation without adding any new local rotation.
-
-    The joint's world position is:
-        pos[joint] = pos[parent] + world_rot[joint].apply(neutral_vec)
+    For each joint:
+        world_rot = parent_world_rot * local_rot
+        position  = parent_position + world_rot.apply(neutral_vector)
     """
     positions = {"pelvis_center": np.zeros(3)}
     rotations = {"pelvis_center": Rotation.identity()}
@@ -97,34 +154,32 @@ def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
         parent_rot = rotations[parent]
 
         if sensor is not None:
-            # Data saved as WXYZ → convert to scipy's XYZW convention.
             q_wxyz = quats[sensor][frame_idx]
+            # Convert wxyz → xyzw for scipy
             q_xyzw = [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]
             local_rot = Rotation.from_quat(q_xyzw)
         else:
-            # Rigid offset: no additional rotation beyond the parent's.
             local_rot = Rotation.identity()
 
-        # Accumulate: world rotation = parent world rotation * local rotation.
         world_rot = parent_rot * local_rot
-
-        # Rotate the segment's local offset vector into world space.
         rotated_vec = world_rot.apply(neutral_vec)
-
         positions[joint_name] = positions[parent] + rotated_vec
         rotations[joint_name] = world_rot
 
     return positions
 
 
-def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=None):
-    time_s, quats = load_kinematics(npz_path)
+# ----------------------------------------------------------------------
+# Animation
+# ----------------------------------------------------------------------
+def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=None,
+                     filter_hp=False, hp_cutoff=0.05):
+    """Load data, optionally filter, and render a skeleton animation."""
+    time_s, quats = load_kinematics(
+        npz_path, filter_hp=filter_hp, hp_cutoff=hp_cutoff
+    )
 
-    # Original sampling rate
-    orig_dt = time_s[1] - time_s[0]
-    orig_fs = 1.0 / orig_dt
-
-    # Downsample to target fps
+    orig_fs = 1.0 / np.median(np.diff(time_s))
     step = max(1, int(orig_fs / fps))
 
     start_idx = 0
@@ -135,11 +190,11 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
         end_idx = int(np.searchsorted(time_s, end_time))
 
     frame_indices = list(range(start_idx, end_idx, step))
+    print(f"Animating {len(frame_indices)} frames at {fps} fps...")
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection='3d')
 
-    # Skeleton connections to draw (parent joint → child joint)
     connections = [
         ("pelvis_center",  "pelvis_right"),
         ("pelvis_center",  "pelvis_left"),
@@ -171,7 +226,8 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
     ax.set_xlabel('X (Right)')
     ax.set_ylabel('Y (Forward)')
     ax.set_zlabel('Z (Up)')
-    ax.set_title("Tai Chi Kinematics")
+    filter_str = " (filtered)" if filter_hp else ""
+    ax.set_title(f"Tai Chi Kinematics{filter_str}")
 
     def update(frame_idx):
         positions = compute_joint_positions(quats, frame_idx)
@@ -190,51 +246,51 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
 
     ani = animation.FuncAnimation(fig, update, frames=frame_indices, blit=False)
 
-    print(f"Saving animation to {output_path} (Frames: {len(frame_indices)})...")
     writer = animation.FFMpegWriter(fps=fps, bitrate=2000)
     ani.save(output_path, writer=writer)
     plt.close(fig)
-    print("Done!")
+    print(f"Saved animation to {output_path}")
 
 
-DEFAULT_NPZ    = "outputs/orientation_novice.npz"
-DEFAULT_OUTPUT = "outputs/animation_novice.mp4"
-DEFAULT_START  = 0.0
-DEFAULT_END    = 60.0
-DEFAULT_FPS    = 60
-
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="animate_kinematics.py",
-        description="Animate Tai Chi Kinematics from IMU orientation data.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,  # shows defaults in --help
+        description="Animate Tai Chi Kinematics from IMU orientation data, "
+                    "optionally high‑pass filtered to remove slow drift.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "npz_path",
-        type=str,
-        nargs="?",                  # makes the positional optional
-        default=DEFAULT_NPZ,
-        help="Path to orientation .npz file",
+        "npz_path", nargs="?", default="outputs/orientation_novice.npz",
+        help="Path to orientation .npz file"
     )
     parser.add_argument(
-        "output_path",
-        type=str,
-        nargs="?",                  # makes the positional optional
-        default=DEFAULT_OUTPUT,
-        help="Path to output .mp4 file",
+        "output_path", nargs="?", default="outputs/animation_novice.mp4",
+        help="Path to output .mp4 file"
     )
-    parser.add_argument("--start", type=float, default=DEFAULT_START, help="Start time in seconds")
-    parser.add_argument("--end",   type=float, default=DEFAULT_END,   help="End time in seconds")
-    parser.add_argument("--fps",   type=int,   default=DEFAULT_FPS,   help="Frames per second")
+    parser.add_argument("--start", type=float, default=0.0, help="Start time (s)")
+    parser.add_argument("--end", type=float, default=60.0, help="End time (s)")
+    parser.add_argument("--fps", type=int, default=60, help="Output frames per second")
+    parser.add_argument(
+        "--filter-highpass", action="store_true",
+        help="Apply a 0.05 Hz high‑pass filter to quaternions before animation"
+    )
+    parser.add_argument(
+        "--hp-cutoff", type=float, default=0.05,
+        help="High‑pass cutoff frequency in Hz (used with --filter-highpass)"
+    )
     args = parser.parse_args()
 
     print(
         f"Running with:\n"
-        f"  npz_path    : {args.npz_path}\n"
-        f"  output_path : {args.output_path}\n"
-        f"  start       : {args.start} s\n"
-        f"  end         : {args.end} s\n"
-        f"  fps         : {args.fps}\n"
+        f"  npz_path      : {args.npz_path}\n"
+        f"  output_path   : {args.output_path}\n"
+        f"  start         : {args.start} s\n"
+        f"  end           : {args.end} s\n"
+        f"  fps           : {args.fps}\n"
+        f"  filter-highpass: {args.filter_highpass}\n"
+        f"  hp-cutoff     : {args.hp_cutoff} Hz\n"
     )
 
     create_animation(
@@ -243,4 +299,6 @@ if __name__ == "__main__":
         fps=args.fps,
         start_time=args.start,
         end_time=args.end,
+        filter_hp=args.filter_highpass,
+        hp_cutoff=args.hp_cutoff,
     )
