@@ -1,4 +1,4 @@
-trial,side,peak_knee_flexion_deg,peak_trunk_pitch_deg,time_to_stabilization_s,lumbar_orientation_variability_deg,corrective_peak_count,largest_corrective_peak_dps,trunk_pelvis_lag_s
+trial,side,peak_knee_flexion_deg,peak_trunk_y_deg,time_to_stabilization_s,lumbar_orientation_variability_deg,corrective_peak_count,largest_corrective_peak_dps,trunk_pelvis_lag_s
 Novice,Left,89.89482278291894,6.786468908576575,4.403699647704028,2.240392185952966,0,12.291933742388142,-1.9979998401600128
 Novice,Left,96.53792945389054,10.228010035811165,5.975099521992038,2.864873620623137,0,16.086958492762623,-1.9979998401600128
 Novice,Left,88.38913609847374,11.021277959265829,0.0,2.104805686321397,1,20.9333234782158,1.9979998401600128

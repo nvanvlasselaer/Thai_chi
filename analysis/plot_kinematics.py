@@ -25,16 +25,16 @@ def plot_angle_groups(data):
     """Plot angles in logical groups"""
     # Define angle groups
     groups = {
-        'Trunk-Pelvis Angles': ['trunk_pelvis_roll_deg', 'trunk_pelvis_pitch_deg', 'trunk_pelvis_yaw_deg'],
-        'Lumbar Angles': ['lumbar_roll_deg', 'lumbar_pitch_deg', 'lumbar_yaw_deg'],
-        'Chest Angles': ['chest_yaw_deg'],
+        'Trunk-Pelvis Angles': ['trunk_pelvis_x_deg', 'trunk_pelvis_y_deg', 'trunk_pelvis_z_deg'],
+        'Lumbar Angles': ['lumbar_x_deg', 'lumbar_y_deg', 'lumbar_z_deg'],
+        'Chest Angles': ['chest_z_deg'],
         'Angular Velocities': ['lumbar_omega_dps', 'chest_omega_dps'],
-        'left_knee Angles': ['left_knee_roll_est_deg', 'left_knee_pitch_est_deg', 'left_knee_yaw_est_deg'],
-        'right_knee Angles': ['right_knee_roll_est_deg', 'right_knee_pitch_est_deg', 'right_knee_yaw_est_deg'],
-        'left_hip Angles': ['left_hip_roll_est_deg', 'left_hip_pitch_est_deg', 'left_hip_yaw_est_deg'],
-        'right_hip Angles': ['right_hip_roll_est_deg', 'right_hip_pitch_est_deg', 'right_hip_yaw_est_deg'],
-        'left_shoulder Angles': ['left_shoulder_roll_est_deg', 'left_shoulder_pitch_est_deg', 'left_shoulder_yaw_est_deg'],
-        'right_shoulder Angles': ['right_shoulder_roll_est_deg', 'right_shoulder_pitch_est_deg', 'right_shoulder_yaw_est_deg'], 
+        'left_knee Angles': ['left_knee_x_est_deg', 'left_knee_y_est_deg', 'left_knee_z_est_deg'],
+        'right_knee Angles': ['right_knee_x_est_deg', 'right_knee_y_est_deg', 'right_knee_z_est_deg'],
+        'left_hip Angles': ['left_hip_x_est_deg', 'left_hip_y_est_deg', 'left_hip_z_est_deg'],
+        'right_hip Angles': ['right_hip_x_est_deg', 'right_hip_y_est_deg', 'right_hip_z_est_deg'],
+        'left_shoulder Angles': ['left_shoulder_x_est_deg', 'left_shoulder_y_est_deg', 'left_shoulder_z_est_deg'],
+        'right_shoulder Angles': ['right_shoulder_x_est_deg', 'right_shoulder_y_est_deg', 'right_shoulder_z_est_deg'], 
     }
     # Filter groups to only include columns that exist in the data
     available_groups = {}

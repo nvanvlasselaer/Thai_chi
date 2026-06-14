@@ -286,7 +286,7 @@ def lowpass_signal(x: np.ndarray, fs: float, cutoff_hz: float = 6.0, order: int 
 
 
 def highpass_detrend(x: np.ndarray, fs: float, cutoff_hz: float = 0.05, order: int = 4) -> np.ndarray:
-    """Zero-phase Butterworth high-pass filter to remove yaw drift trends.
+    """Zero-phase Butterworth high-pass filter to remove z-axis drift trends.
 
     A 0.05 Hz cutoff removes slow drift (period > 20 s) while preserving all
     Tai Chi trunk-rotation content (typically 0.2–1 Hz).  The filter is applied
@@ -476,19 +476,19 @@ def resample_filtered_full(
 
 
 def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: int = 3) -> tuple[list[tuple[int, int, int]], str]:
-    yaw = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
-    yaw = lowpass_signal(yaw, fs, cutoff_hz=4.0)
+    z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
+    z = lowpass_signal(z, fs, cutoff_hz=4.0)
     chest_omega = lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=6.0)
     ignore = int(15 * fs)
     window = int(8 * fs)
     step = int(1 * fs)
     
     scores = []
-    for start in range(ignore, len(yaw) - window - ignore, step):
+    for start in range(ignore, len(z) - window - ignore, step):
         end = start + window
-        yaw_range = np.ptp(yaw[start:end])
+        z_range = np.ptp(z[start:end])
         omega_peak = np.percentile(chest_omega[start:end], 95)
-        score = yaw_range * np.log1p(omega_peak)
+        score = z_range * np.log1p(omega_peak)
         scores.append((score, start, end))
         
     scores.sort(key=lambda x: x[0], reverse=True)
@@ -501,23 +501,23 @@ def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: 
                 overlap = True
                 break
         if not overlap:
-            peak = start + int(np.argmax(np.abs(yaw[start:end] - np.median(yaw[start:end]))))
+            peak = start + int(np.argmax(np.abs(z[start:end] - np.median(z[start:end]))))
             selected_events.append((start, end, peak))
         if len(selected_events) == num_events:
             break
             
     selected_events.sort(key=lambda x: x[0])
-    rationale = f"Selected {num_events} 8 s trunk-rotation transitions based on combined trunk-pelvis relative-yaw excursion and chest angular-velocity peaks."
+    rationale = f"Selected {num_events} 8 s trunk-rotation transitions based on combined trunk-pelvis relative-z excursion and chest angular-velocity peaks."
     return selected_events, rationale
 
 
 def signature_matrix(kin: Kinematics, fs: float, start: int, end: int, target_fs: float = 20.0) -> np.ndarray:
     # Detrend yaw over the full signal before slicing the window so that slow
     # drift accumulated before the window does not shift the baseline.
-    yaw_detrended = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
+    z_detrended = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
     sig = np.column_stack(
         [
-            resample_filtered_window(kin.t, yaw_detrended, fs, start, end, target_fs),
+            resample_filtered_window(kin.t, z_detrended, fs, start, end, target_fs),
             resample_filtered_window(kin.t, kin.eulers_deg["lumbar"][:, 0], fs, start, end, target_fs),
             resample_filtered_window(kin.t, kin.omega_mag["chestbone"], fs, start, end, target_fs),
             resample_filtered_window(kin.t, kin.left_knee_deg[:, 0], fs, start, end, target_fs),
@@ -723,23 +723,23 @@ def summarize_knee_flexion_event(
         "peak_signed_knee_flexion_deg": float(knee_filtered[peak_idx]),
         "peak_abs_knee_flexion_deg": float(knee_abs[peak_idx]),
         "knee_flexion_range_deg": float(np.ptp(knee_abs[event])),
-        "trunk_rel_roll_mean_deg": float(trunk_rel_mean[0]),
-        "trunk_rel_pitch_mean_deg": float(trunk_rel_mean[1]),
-        "trunk_rel_yaw_mean_deg": float(trunk_rel_mean[2]),
-        "trunk_rel_roll_range_deg": float(np.ptp(trunk_rel[:, 0])),
-        "trunk_rel_pitch_range_deg": float(np.ptp(trunk_rel[:, 1])),
-        "trunk_rel_yaw_range_deg": float(np.ptp(trunk_rel[:, 2])),
-        "lumbar_roll_mean_deg": float(lumbar_mean[0]),
-        "lumbar_pitch_mean_deg": float(lumbar_mean[1]),
-        "lumbar_yaw_mean_deg": float(lumbar_mean[2]),
-        "lumbar_roll_range_deg": float(np.ptp(lumbar[:, 0])),
-        "lumbar_pitch_range_deg": float(np.ptp(lumbar[:, 1])),
-        "lumbar_yaw_range_deg": float(np.ptp(lumbar[:, 2])),
+        "trunk_rel_x_mean_deg": float(trunk_rel_mean[0]),
+        "trunk_rel_y_mean_deg": float(trunk_rel_mean[1]),
+        "trunk_rel_z_mean_deg": float(trunk_rel_mean[2]),
+        "trunk_rel_x_range_deg": float(np.ptp(trunk_rel[:, 0])),
+        "trunk_rel_y_range_deg": float(np.ptp(trunk_rel[:, 1])),
+        "trunk_rel_z_range_deg": float(np.ptp(trunk_rel[:, 2])),
+        "lumbar_x_mean_deg": float(lumbar_mean[0]),
+        "lumbar_y_mean_deg": float(lumbar_mean[1]),
+        "lumbar_z_mean_deg": float(lumbar_mean[2]),
+        "lumbar_x_range_deg": float(np.ptp(lumbar[:, 0])),
+        "lumbar_y_range_deg": float(np.ptp(lumbar[:, 1])),
+        "lumbar_z_range_deg": float(np.ptp(lumbar[:, 2])),
         "peak_lumbar_angular_velocity_dps": float(np.max(lumbar_omega)),
         "peak_chest_angular_velocity_dps": float(np.max(chest_omega)),
-        "peak_trunk_rel_roll_deg": float(trunk_rel[peak_rel, 0]),
-        "peak_trunk_rel_pitch_deg": float(trunk_rel[peak_rel, 1]),
-        "peak_trunk_rel_yaw_deg": float(trunk_rel[peak_rel, 2]),
+        "peak_trunk_rel_x_deg": float(trunk_rel[peak_rel, 0]),
+        "peak_trunk_rel_y_deg": float(trunk_rel[peak_rel, 1]),
+        "peak_trunk_rel_z_deg": float(trunk_rel[peak_rel, 2]),
     }
 
 
@@ -748,9 +748,9 @@ def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, fs: floa
     stab = slice(stab_start, stab_end)
     # Detrend yaw over the full signal before slicing the event window so that
     # slow drift accumulated before the event does not corrupt the correlation.
-    lumbar_yaw_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
-    chest_yaw_detrended = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
-    corr, lag = cross_correlation_lag(lumbar_yaw_detrended[event], chest_yaw_detrended[event], fs)
+    lumbar_z_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
+    chest_z_detrended = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
+    corr, lag = cross_correlation_lag(lumbar_z_detrended[event], chest_z_detrended[event], fs)
     dj = dimensionless_jerk(kin.eulers_deg["lumbar"][event, 0], fs)
     orientation = kin.eulers_deg["lumbar"][stab, :]
     orient_var = float(np.sqrt(np.mean(np.var(orientation, axis=0))))
@@ -780,93 +780,93 @@ def save_orientation_npz(label: str, kin: Kinematics) -> None:
 
 def save_kinematic_variables(label: str, kin: Kinematics, fs: float) -> None:
     target_fs = 50.0
-    target_time, trunk_roll = resample_filtered_full(kin.t, kin.trunk_rel_euler_deg[:, 0], fs, target_fs)
-    _, trunk_pitch = resample_filtered_full(kin.t, kin.trunk_rel_euler_deg[:, 1], fs, target_fs)
-    # Detrend yaw channels before resampling to remove drift trend from exported CSV.
-    trunk_yaw_detrended = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
-    lumbar_yaw_raw = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
-    chest_yaw_raw = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
-    _, trunk_yaw = resample_filtered_full(kin.t, trunk_yaw_detrended, fs, target_fs)
-    _, lumbar_roll = resample_filtered_full(kin.t, kin.eulers_deg["lumbar"][:, 0], fs, target_fs)
-    _, lumbar_pitch = resample_filtered_full(kin.t, kin.eulers_deg["lumbar"][:, 1], fs, target_fs)
-    _, lumbar_yaw = resample_filtered_full(kin.t, lumbar_yaw_raw, fs, target_fs)
-    _, chest_yaw = resample_filtered_full(kin.t, chest_yaw_raw, fs, target_fs)
+    target_time, trunk_x = resample_filtered_full(kin.t, kin.trunk_rel_euler_deg[:, 0], fs, target_fs)
+    _, trunk_y = resample_filtered_full(kin.t, kin.trunk_rel_euler_deg[:, 1], fs, target_fs)
+    # Detrend z channels before resampling to remove drift trend from exported CSV.
+    trunk_z_detrended = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
+    lumbar_z_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
+    chest_z_detrended = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
+    _, trunk_z = resample_filtered_full(kin.t, trunk_z_detrended, fs, target_fs)
+    _, lumbar_x = resample_filtered_full(kin.t, kin.eulers_deg["lumbar"][:, 0], fs, target_fs)
+    _, lumbar_y = resample_filtered_full(kin.t, kin.eulers_deg["lumbar"][:, 1], fs, target_fs)
+    _, lumbar_z = resample_filtered_full(kin.t, lumbar_z_detrended, fs, target_fs)
+    _, chest_z = resample_filtered_full(kin.t, chest_z_detrended, fs, target_fs)
     _, lumbar_omega = resample_filtered_full(kin.t, kin.omega_mag["lumbar"], fs, target_fs)
     _, chest_omega = resample_filtered_full(kin.t, kin.omega_mag["chestbone"], fs, target_fs)
-    _, left_knee_roll = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_knee_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_knee_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_knee_roll = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_knee_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_knee_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_ankle_roll = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_ankle_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_ankle_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_ankle_roll = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_ankle_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_ankle_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_shoulder_roll = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_shoulder_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_shoulder_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_shoulder_roll = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_shoulder_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_shoulder_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_elbow_roll = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_elbow_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_elbow_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_elbow_roll = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_elbow_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_elbow_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_hip_roll = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_hip_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, left_hip_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_hip_roll = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_hip_pitch = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
-    _, right_hip_yaw = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_knee_x = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_knee_y = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_knee_z = resample_filtered_full(kin.t, highpass_detrend(kin.left_knee_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_knee_x = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_knee_y = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_knee_z = resample_filtered_full(kin.t, highpass_detrend(kin.right_knee_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_ankle_x = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_ankle_y = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_ankle_z = resample_filtered_full(kin.t, highpass_detrend(kin.left_ankle_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_ankle_x = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_ankle_y = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_ankle_z = resample_filtered_full(kin.t, highpass_detrend(kin.right_ankle_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_shoulder_x = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_shoulder_y = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_shoulder_z = resample_filtered_full(kin.t, highpass_detrend(kin.left_shoulder_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_shoulder_x = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_shoulder_y = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_shoulder_z = resample_filtered_full(kin.t, highpass_detrend(kin.right_shoulder_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_elbow_x = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_elbow_y = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_elbow_z = resample_filtered_full(kin.t, highpass_detrend(kin.left_elbow_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_elbow_x = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_elbow_y = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_elbow_z = resample_filtered_full(kin.t, highpass_detrend(kin.right_elbow_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_hip_x = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_hip_y = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, left_hip_z = resample_filtered_full(kin.t, highpass_detrend(kin.left_hip_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_hip_x = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 0], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_hip_y = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 1], fs, cutoff_hz=0.05), fs, target_fs)
+    _, right_hip_z = resample_filtered_full(kin.t, highpass_detrend(kin.right_hip_deg[:, 2], fs, cutoff_hz=0.05), fs, target_fs)
     df = pd.DataFrame(
         {
             "time_s": target_time,
-            "trunk_pelvis_roll_deg": trunk_roll,
-            "trunk_pelvis_pitch_deg": trunk_pitch,
-            "trunk_pelvis_yaw_deg": trunk_yaw,
-            "lumbar_roll_deg": lumbar_roll,
-            "lumbar_pitch_deg": lumbar_pitch,
-            "lumbar_yaw_deg": lumbar_yaw,
-            "chest_yaw_deg": chest_yaw,
+            "trunk_pelvis_x_deg": trunk_x,
+            "trunk_pelvis_y_deg": trunk_y,
+            "trunk_pelvis_z_deg": trunk_z,
+            "lumbar_x_deg": lumbar_x,
+            "lumbar_y_deg": lumbar_y,
+            "lumbar_z_deg": lumbar_z,
+            "chest_z_deg": chest_z,
 
             "lumbar_omega_dps": lumbar_omega,
             "chest_omega_dps": chest_omega,
 
-            "left_knee_roll_est_deg": left_knee_roll,
-            "left_knee_pitch_est_deg": left_knee_pitch,
-            "left_knee_yaw_est_deg": left_knee_yaw,
-            "right_knee_roll_est_deg": right_knee_roll,
-            "right_knee_pitch_est_deg": right_knee_pitch,
-            "right_knee_yaw_est_deg": right_knee_yaw,
-            "left_ankle_roll_est_deg": left_ankle_roll,
-            "left_ankle_pitch_est_deg": left_ankle_pitch,
-            "left_ankle_yaw_est_deg": left_ankle_yaw,
-            "right_ankle_roll_est_deg": right_ankle_roll,
-            "right_ankle_pitch_est_deg": right_ankle_pitch,
-            "right_ankle_yaw_est_deg": right_ankle_yaw,
-            "left_shoulder_roll_est_deg": left_shoulder_roll,
-            "left_shoulder_pitch_est_deg": left_shoulder_pitch,
-            "left_shoulder_yaw_est_deg": left_shoulder_yaw,
-            "right_shoulder_roll_est_deg": right_shoulder_roll,
-            "right_shoulder_pitch_est_deg": right_shoulder_pitch,
-            "right_shoulder_yaw_est_deg": right_shoulder_yaw,
-            "left_elbow_roll_est_deg": left_elbow_roll,
-            "left_elbow_pitch_est_deg": left_elbow_pitch,
-            "left_elbow_yaw_est_deg": left_elbow_yaw,
-            "right_elbow_roll_est_deg": right_elbow_roll,
-            "right_elbow_pitch_est_deg": right_elbow_pitch,
-            "right_elbow_yaw_est_deg": right_elbow_yaw,
-            "left_hip_roll_est_deg": left_hip_roll,
-            "left_hip_pitch_est_deg": left_hip_pitch,
-            "left_hip_yaw_est_deg": left_hip_yaw,
-            "right_hip_roll_est_deg": right_hip_roll,
-            "right_hip_pitch_est_deg": right_hip_pitch,
-            "right_hip_yaw_est_deg": right_hip_yaw,
+            "left_knee_x_est_deg": left_knee_x,
+            "left_knee_y_est_deg": left_knee_y,
+            "left_knee_z_est_deg": left_knee_z,
+            "right_knee_x_est_deg": right_knee_x,
+            "right_knee_y_est_deg": right_knee_y,
+            "right_knee_z_est_deg": right_knee_z,
+            "left_ankle_x_est_deg": left_ankle_x,
+            "left_ankle_y_est_deg": left_ankle_y,
+            "left_ankle_z_est_deg": left_ankle_z,
+            "right_ankle_x_est_deg": right_ankle_x,
+            "right_ankle_y_est_deg": right_ankle_y,
+            "right_ankle_z_est_deg": right_ankle_z,
+            "left_shoulder_x_est_deg": left_shoulder_x,
+            "left_shoulder_y_est_deg": left_shoulder_y,
+            "left_shoulder_z_est_deg": left_shoulder_z,
+            "right_shoulder_x_est_deg": right_shoulder_x,
+            "right_shoulder_y_est_deg": right_shoulder_y,
+            "right_shoulder_z_est_deg": right_shoulder_z,
+            "left_elbow_x_est_deg": left_elbow_x,
+            "left_elbow_y_est_deg": left_elbow_y,
+            "left_elbow_z_est_deg": left_elbow_z,
+            "right_elbow_x_est_deg": right_elbow_x,
+            "right_elbow_y_est_deg": right_elbow_y,
+            "right_elbow_z_est_deg": right_elbow_z,
+            "left_hip_x_est_deg": left_hip_x,
+            "left_hip_y_est_deg": left_hip_y,
+            "left_hip_z_est_deg": left_hip_z,
+            "right_hip_x_est_deg": right_hip_x,
+            "right_hip_y_est_deg": right_hip_y,
+            "right_hip_z_est_deg": right_hip_z,
         }
     )
     df.to_csv(OUTPUT_DIR / f"kinematic_variables_{label.lower()}_50hz.csv", index=False)
@@ -885,18 +885,18 @@ def make_trunk_traceability_figure(
 
     for ax, label, kin in [(axes[0], "Novice", novice), (axes[1], "Trained", trained)]:
         t = kin.t
-        yaw = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
-        yaw = lowpass_signal(yaw, fs, cutoff_hz=4.0)
-        # roll = lowpass_signal(kin.trunk_rel_euler_deg[:, 0], fs, cutoff_hz=4.0)
-        # pitch = lowpass_signal(kin.trunk_rel_euler_deg[:, 1], fs, cutoff_hz=4.0)
-        # yaw_vel = np.gradient(yaw, 1.0 / fs)
+        z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
+        z = lowpass_signal(z, fs, cutoff_hz=4.0)
+        # x = lowpass_signal(kin.trunk_rel_euler_deg[:, 0], fs, cutoff_hz=4.0)
+        # y = lowpass_signal(kin.trunk_rel_euler_deg[:, 1], fs, cutoff_hz=4.0)
+        # z_vel = np.gradient(z, 1.0 / fs)
         
-        ax.plot(t, yaw, color="#1f77b4", lw=1.2, label="rel yaw")
-        # ax.plot(t, roll, color="#9467bd", lw=1.2, label="rel roll")
-        # ax.plot(t, pitch, color="#8c564b", lw=1.2, label="rel pitch")
+        ax.plot(t, z, color="#1f77b4", lw=1.2, label="rel z")
+        # ax.plot(t, x, color="#9467bd", lw=1.2, label="rel x")
+        # ax.plot(t, y, color="#8c564b", lw=1.2, label="rel y")
         
         # ax2 = ax.twinx()
-        # ax2.plot(t, yaw_vel, color="#e377c2", lw=1.0, linestyle="--", label="yaw vel")
+        # ax2.plot(t, z_vel, color="#e377c2", lw=1.0, linestyle="--", label="z vel")
         # ax2.set_ylabel("vel (deg/s)", color="#e377c2", fontsize=9)
         # ax2.tick_params(axis='y', labelcolor="#e377c2", labelsize=8)
         
@@ -904,7 +904,7 @@ def make_trunk_traceability_figure(
             ax.axvspan(event_start / fs, event_end / fs, color="#f2b134", alpha=0.22, label="aligned event" if i == 0 else "")
             ax.axvspan(stab_start / fs, stab_end / fs, color="#57a773", alpha=0.18, label="stabilization" if i == 0 else "")
             if label == "Novice":
-                ax.scatter([t[peak]], [yaw[peak]], s=30, color="#d1495b", zorder=4, label="yaw peak" if i == 0 else "")
+                ax.scatter([t[peak]], [z[peak]], s=30, color="#d1495b", zorder=4, label="z peak" if i == 0 else "")
         
         ax.set_ylabel(f"{label}\nangle (deg)")
         ax.grid(True, color="#dddddd", lw=0.6)
@@ -973,13 +973,13 @@ def compute_knee_balance_metrics(
         kin.omega_mag["lumbar"][stab_start:stab_end], fs
     )
 
-    trunk_pitch = lowpass_signal(kin.eulers_deg["lumbar"][:,1], fs, cutoff_hz=4.0)
+    trunk_y = lowpass_signal(kin.eulers_deg["lumbar"][:,1], fs, cutoff_hz=4.0)
 
     return {
         "trial": label,
         "side": side,
         "peak_knee_flexion_deg": float(knee_abs[peak_idx]),
-        "peak_trunk_pitch_deg": float(trunk_pitch[peak_idx]),
+        "peak_trunk_y_deg": float(trunk_y[peak_idx]),
         "time_to_stabilization_s": float((stab_start - peak_idx) / fs),
         "lumbar_orientation_variability_deg": orient_var,
         "corrective_peak_count": peak_count,
@@ -1008,9 +1008,9 @@ def make_knee_flexion_overview_figure(
         t = kin.t
         left_knee = np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0))
         right_knee = np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0))
-        trunk_pitch = lowpass_signal(kin.eulers_deg["lumbar"][:, 1], fs, cutoff_hz=4.0)
-        trunk_roll = lowpass_signal(kin.eulers_deg["lumbar"][:, 0], fs, cutoff_hz=4.0)
-        trunk_yaw = lowpass_signal(highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05), fs, cutoff_hz=4.0)
+        trunk_y = lowpass_signal(kin.eulers_deg["lumbar"][:, 1], fs, cutoff_hz=4.0)
+        trunk_x = lowpass_signal(kin.eulers_deg["lumbar"][:, 0], fs, cutoff_hz=4.0)
+        trunk_z = lowpass_signal(highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05), fs, cutoff_hz=4.0)
 
         knee_ax.plot(t, left_knee, lw=1.0, label="left knee |flexion|")
         knee_ax.plot(t, right_knee, lw=1.0, label="right knee |flexion|")
@@ -1032,9 +1032,9 @@ def make_knee_flexion_overview_figure(
             seen_knee_labels.add(knee_label)
             knee_ax.scatter([ev["peak_time_s"]], [ev["peak_abs_knee_flexion_deg"]], s=18, color="#d1495b", zorder=4)
 
-        trunk_ax.plot(t, trunk_pitch, lw=1.0, label="lumbar pitch")
-        trunk_ax.plot(t, trunk_roll, lw=1.0, label="lumbar roll")
-        trunk_ax.plot(t, trunk_yaw, lw=1.0, label="trunk-relative yaw")
+        trunk_ax.plot(t, trunk_y, lw=1.0, label="lumbar y")
+        trunk_ax.plot(t, trunk_x, lw=1.0, label="lumbar x")
+        trunk_ax.plot(t, trunk_z, lw=1.0, label="trunk-relative z")
         trunk_ax.set_ylabel("trunk angle (deg)")
         trunk_ax.set_xlabel("time (s)")
         trunk_ax.grid(True, color="#dddddd", lw=0.6)
@@ -1123,7 +1123,7 @@ def make_knee_traceability_figure(
         "lumbar_orientation_variability_deg",
         "corrective_peak_count",
         "trunk_pelvis_lag_s",
-        "peak_trunk_pitch_deg",
+        "peak_trunk_y_deg",
     ]
 
     pretty = [
@@ -1131,7 +1131,7 @@ def make_knee_traceability_figure(
         "orientation variability (deg)",
         "corrective peaks",
         "trunk-pelvis lag (s)",
-        "peak trunk pitch (deg)",
+        "peak trunk y (deg)",
     ]
 
     novice_vals = [
@@ -1177,12 +1177,12 @@ def make_orientation_validation_figure(novice: Kinematics, trained: Kinematics, 
     for row, (label, kin) in enumerate([("Novice", novice), ("Trained", trained)]):
         for col, sensor in enumerate(["lumbar", "chestbone"]):
             ax = axes[row, col]
-            target_time, roll = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 0], fs, 10.0)
-            _, pitch = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 1], fs, 10.0)
-            _, yaw = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 2], fs, 10.0)
-            ax.plot(target_time, roll, lw=0.9, label="roll")
-            ax.plot(target_time, pitch, lw=0.9, label="pitch")
-            ax.plot(target_time, yaw, lw=0.9, label="yaw")
+            target_time, x = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 0], fs, 10.0)
+            _, y = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 1], fs, 10.0)
+            _, z = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 2], fs, 10.0)
+            ax.plot(target_time, x, lw=0.9, label="x")
+            ax.plot(target_time, y, lw=0.9, label="y")
+            ax.plot(target_time, z, lw=0.9, label="z")
             ax.set_title(f"{label} {sensor} orientation")
             ax.set_xlabel("time (s)")
             ax.set_ylabel("angle (deg)")
