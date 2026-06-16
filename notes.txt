@@ -1,0 +1,39 @@
+Lhumerus: left upper arm placed on the lateral side of the arm, Rhumerus: right upper arm placed on the lateral side of the arm, Lulna: left lower arm placed on the front side of the arm, Rulna: right lower arm, placed on the front side of the arm, Lhand: left hand (placed on the dorsal side of the hand), Rhand: right hand (placed on the dorsal side of the hand), Chestbone: sternum placed on the front side of the body, Lumbar: lower back placed on the back side of the body, Lthigh: left upper leg on the lateral side of the body, Rthigh: right upper leg placed on the lateral side of the body, Ltibia: left lower leg placed on the lateral side of the body, Rtibia: right lower leg placed on the lateral side of the body, Lfoot: left foot placed on the top of the foot, Rfoot: right foot placed on the top of the foot
+
+the absence of magnetometer data and the consequent yaw drift should be noted as a limitation on the absolute yaw metrics, while clarifying that relative joint angles (knee, ankle, trunk-pelvis roll/pitch) are unaffected.
+Most of the yaw drift can be mitigated with a 0.05Hz high pass filter
+
+Calibration: 
+When you only have an accelerometer (ACC) and gyroscope (GYR), you can only determine the tilt (pitch and roll) relative to gravity. The yaw axis (rotation around the gravity vector) remains completely unobservable and ambiguous.To fix the yaw alignment without a magnetometer, you must use one of the following kinematic or structural methods:1. Functional Calibration Movement (Dynamic)Instead of staying completely still, the user performs a specific, single-axis movement immediately after the neutral pose.The Action: The user takes a straight step forward, or performs a pure sagittal plane movement (like a knee bend).The Math: The gyroscope detects the dominant axis of rotation, or the accelerometer detects the linear acceleration vector of forward motion.The Alignment: The software defines this direction of movement as the forward-facing axis (X-axis), resolving the yaw ambiguity.2. Anatomical Alignment During Mount (Physical)You rely on precise physical placement rather than mathematical calculation for the yaw axis.The Action: You must manually align one physical edge of the sensor housing perfectly parallel to a known anatomical plane (e.g., flat against the lateral side of the thigh, pointing straight forward).The Alignment: The software assumes the sensor's physical yaw orientation exactly matches the segment's yaw orientation.3. Joint Constraints (Kinematic Modeling)You use the anatomical limits of human joints to estimate the missing yaw.The Action: The user moves naturally (e.g., walking).The Alignment: An extended Kalman Filter (EKF) uses a biomechanical model (e.g., the knee is a hinge joint that primarily bends in one plane). The software mathematically rotates the sensor frames until the measured joint acceleration matches a realistic hinge movement, correcting the yaw offset over the first few steps.
+
+1. Dimensionless jerk spans several orders of magnitude
+
+Dimensionless jerk quantifies movement smoothness by normalising the time‑integral of squared jerk by movement duration and amplitude.
+In human movement it often ranges from ~10¹ (very smooth) to >10⁵ (extremely jerky).
+A linear scale compresses the low end and makes it hard to visually or statistically discriminate between “smooth” and “very smooth” movements, while a few jerky trials can dominate any linear analysis.
+
+log₁₀ compresses the range symmetrically: each step of +1 corresponds to a ten‑fold increase in jerk.
+
+dj = 10 → log₁₀ = 1
+dj = 100 → log₁₀ = 2
+dj = 1000 → log₁₀ = 3
+So a difference of 1 on the log scale is a factor of 10 in smoothness, which is far more interpretable for comparing conditions or subjects.
+
+2. Makes the distribution more normal
+
+dj is typically heavily right‑skewed (many low values, a few very large ones).
+The log transform reduces skewness, making the data better suited for parametric statistical tests (t‑tests, ANOVA, linear mixed models) that assume normally distributed residuals.
+This improves the validity of p‑values and confidence intervals.
+
+3. Improves homoscedasticity (equal variance)
+
+Variance of raw dj often increases with the mean.
+Log‑transforming tends to stabilise the variance across groups or conditions (a constant coefficient of variation becomes an additive constant on the log scale).
+This is another key assumption for many statistical models.
+
+4. Robustness and interpretation
+
+Reporting both dj and log₁₀(dj) lets the reader see the raw value while using the log‑transformed version for formal comparisons.
+The if dj > 0 guard avoids taking the log of zero (a theoretical possibility if the movement were perfectly smooth, but in practice dj is always positive; it just prevents a math domain error).
+
+In short: log₁₀(dj) is used as the primary metric for statistical inference because it makes the measure of movement smoothness normally distributed, homoscedastic, and more interpretable across its wide dynamic range.

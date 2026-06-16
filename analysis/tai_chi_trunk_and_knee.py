@@ -360,13 +360,13 @@ def get_nominal_sensor_quaternion(sensor_name: str) -> np.ndarray:
     
 ## because the sensors are mounted in different orientations on the body, we need to apply a rotation to align them to a common reference frame.
     if sensor_name in ["chestbone", "lulna", "rulna"]:
-        R = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]) # internal orientation of these sensors is x = forward, y = left, and z = upward. R transforms local coordinate system to common reference frame: x = forward, y = right, and z = downward
+        R = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]) 
     elif sensor_name == "lumbar":
-        R = np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]]) # internal orientation of this sensor is x = backward, y = left, and z = upward. R transforms local coordinate system to common reference frame: x = forward, y = right, and z = downward
+        R = np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]]) 
     elif sensor_name in ["lhumerus", "lhand", "lthigh", "ltibia"]:
-        R = np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]]) # internal orientation of these sensors is x = downward, y = left, and z = backward. R transforms local coordinate system to common reference frame: x = forward, y = right, and z = downward
+        R = np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]]) 
     elif sensor_name in ["rhumerus", "rhand", "rthigh", "rtibia"]:
-        R = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]]) # internal orientation of these sensors is x = upward, y = right, and z = forward. R transforms local coordinate system to common reference frame: x = forward, y = right, and z = downward
+        R = np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]]) 
     elif sensor_name in ["lfoot", "rfoot"]:
         R = np.eye(3) # internal orientation of these sensors is already aligned with the common reference frame: x = forward, y = right, and z = downward
     else:

@@ -139,13 +139,45 @@ def load_kinematics(npz_path, filter_hp=False, hp_cutoff=0.05, hp_order=4):
 # ----------------------------------------------------------------------
 # Forward kinematics
 # ----------------------------------------------------------------------
-def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
-    """
-    Compute joint world positions for a single frame using accumulated rotations.
+# def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
+#     """
+#     Compute joint world positions for a single frame using accumulated rotations.
 
-    For each joint:
-        world_rot = parent_world_rot * local_rot
-        position  = parent_position + world_rot.apply(neutral_vector)
+#     For each joint:
+#         world_rot = parent_world_rot * local_rot
+#         position  = parent_position + world_rot.apply(neutral_vector)
+#     """
+#     positions = {"pelvis_center": np.zeros(3)}
+#     rotations = {"pelvis_center": Rotation.identity()}
+
+#     for joint_name, (parent, sensor, neutral_vec) in SEGMENTS.items():
+#         parent_rot = rotations[parent]
+
+#         if sensor is not None:
+#             q_wxyz = quats[sensor][frame_idx]
+#             # Convert wxyz → xyzw for scipy
+#             q_xyzw = [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]
+#             local_rot = Rotation.from_quat(q_xyzw)
+#         else:
+#             local_rot = Rotation.identity()
+
+#         world_rot = parent_rot * local_rot
+#         rotated_vec = world_rot.apply(neutral_vec)
+#         positions[joint_name] = positions[parent] + rotated_vec
+#         rotations[joint_name] = world_rot
+
+#     return positions
+
+
+def compute_joint_positions(quats: dict, frame_idx: int) -> tuple:
+    """
+    Compute joint world positions for a single frame
+    IMU's output GLOBAL orientation in world frame, so we can use it directly to compute the position of each joint in the world frame.
+    
+    Returns
+    -------
+    positions : dict {joint_name: (3,) array}
+    rotations : dict {joint_name: Rotation object}
     """
     positions = {"pelvis_center": np.zeros(3)}
     rotations = {"pelvis_center": Rotation.identity()}
@@ -157,24 +189,22 @@ def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
             q_wxyz = quats[sensor][frame_idx]
             # Convert wxyz → xyzw for scipy
             q_xyzw = [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]
-            local_rot = Rotation.from_quat(q_xyzw)
+            world_rot = Rotation.from_quat(q_xyzw)
         else:
-            local_rot = Rotation.identity()
+            world_rot = parent_rot
 
-        world_rot = parent_rot * local_rot
         rotated_vec = world_rot.apply(neutral_vec)
         positions[joint_name] = positions[parent] + rotated_vec
         rotations[joint_name] = world_rot
 
-    return positions
-
+    return positions, rotations
 
 # ----------------------------------------------------------------------
 # Animation
 # ----------------------------------------------------------------------
 def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=None,
-                     filter_hp=False, hp_cutoff=0.05):
-    """Load data, optionally filter, and render a skeleton animation."""
+                     filter_hp=False, hp_cutoff=0.05, quiver_scale=0.1, show_quivers=True):
+    """Load data, optionally filter, and render a skeleton animation with reference frames."""
     time_s, quats = load_kinematics(
         npz_path, filter_hp=filter_hp, hp_cutoff=hp_cutoff
     )
@@ -220,6 +250,17 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
         line, = ax.plot([], [], [], 'o-', lw=2, markersize=4)
         lines.append(line)
 
+    # Create line segments for reference frame axes (X, Y, Z)
+    axis_lines = {}
+    
+    if show_quivers:
+        for joint_name in SEGMENTS.keys():
+            axis_lines[joint_name] = {
+                'x': ax.plot([], [], [], color='red', lw=1.5, alpha=0.7)[0],    # X-axis (red)
+                'y': ax.plot([], [], [], color='green', lw=1.5, alpha=0.7)[0],  # Y-axis (green)
+                'z': ax.plot([], [], [], color='blue', lw=1.5, alpha=0.7)[0],   # Z-axis (blue)
+            }
+
     ax.set_xlim(-1, 1)
     ax.set_ylim(-1, 1)
     ax.set_zlim(-1, 1)
@@ -230,7 +271,9 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
     ax.set_title(f"Tai Chi Kinematics{filter_str}")
 
     def update(frame_idx):
-        positions = compute_joint_positions(quats, frame_idx)
+        positions, rotations = compute_joint_positions(quats, frame_idx)
+        
+        # Update skeleton lines
         for i, (j1, j2) in enumerate(connections):
             p1 = positions[j1]
             p2 = positions[j2]
@@ -242,13 +285,41 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
                 lines[i].set_color('blue')
             else:
                 lines[i].set_color('black')
+        
+        # Update reference frame axes as line segments
+        if show_quivers:
+            for joint_name in SEGMENTS.keys():
+                pos = positions[joint_name]
+                rot = rotations[joint_name]
+                
+                # Get unit vectors for X, Y, Z axes in world frame
+                x_axis = rot.apply([1, 0, 0])
+                y_axis = rot.apply([0, 1, 0])
+                z_axis = rot.apply([0, 0, 1])
+                
+                # Update X-axis line (red)
+                x_end = pos + quiver_scale * x_axis
+                axis_lines[joint_name]['x'].set_data([pos[0], x_end[0]], [pos[1], x_end[1]])
+                axis_lines[joint_name]['x'].set_3d_properties([pos[2], x_end[2]])
+                
+                # Update Y-axis line (green)
+                y_end = pos + quiver_scale * y_axis
+                axis_lines[joint_name]['y'].set_data([pos[0], y_end[0]], [pos[1], y_end[1]])
+                axis_lines[joint_name]['y'].set_3d_properties([pos[2], y_end[2]])
+                
+                # Update Z-axis line (blue)
+                z_end = pos + quiver_scale * z_axis
+                axis_lines[joint_name]['z'].set_data([pos[0], z_end[0]], [pos[1], z_end[1]])
+                axis_lines[joint_name]['z'].set_3d_properties([pos[2], z_end[2]])
+        
         return lines
 
     ani = animation.FuncAnimation(fig, update, frames=frame_indices, blit=False)
 
     writer = animation.FFMpegWriter(fps=fps, bitrate=2000)
     ani.save(output_path, writer=writer)
-    plt.close(fig)
+    # plt.close(fig)
+    plt.show()
     print(f"Saved animation to {output_path}")
 
 
