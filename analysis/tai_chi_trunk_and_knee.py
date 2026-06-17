@@ -585,8 +585,8 @@ def dimensionless_jerk(angle_deg: np.ndarray, fs: float) -> float:
     angle = np.deg2rad(lowpass_signal(angle_deg, fs, cutoff_hz=6.0, order=4))
     dt = 1.0 / fs
     vel = np.gradient(angle, dt)
-    acc = np.gradient(vel, dt)
-    jerk = np.gradient(acc, dt)
+    acc = np.gradient(lowpass_signal(vel, fs, cutoff_hz=6.0), dt)
+    jerk = np.gradient(lowpass_signal(acc, fs, cutoff_hz=6.0), dt)
     duration = len(angle) / fs
     amplitude = np.ptp(angle)
     if amplitude < 1e-9:
@@ -714,7 +714,8 @@ def summarize_knee_flexion_event(
 
     return {
         "trial": label,
-        "side": side,
+        "flexed_leg": side,
+        "stance_leg": "Right" if side.lower().startswith("l") else "Left",
         "threshold_deg": threshold_deg,
         "window_start_s": start / fs,
         "window_end_s": end / fs,
@@ -743,9 +744,19 @@ def summarize_knee_flexion_event(
     }
 
 
-def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, fs: float, start: int, end: int, stab_start: int, stab_end: int) -> dict[str, float | str]:
+def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: TrialData, start: int, end: int, stab_start: int, stab_end: int) -> dict[str, float | str]:
+    fs = trial.fs
     event = slice(start, end)
     stab = slice(stab_start, stab_end)
+    
+    # Compute ML/AP acceleration variance
+    lumbar_acc = trial.data["lumbar"][["acc_x_g", "acc_y_g", "acc_z_g"]].to_numpy()[:len(kin.t)]
+    R_lumbar = np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]])
+    body_acc = lumbar_acc @ R_lumbar.T
+    # Internal body frame (based on script's nominal definition): x=forward(AP), y=right(ML), z=downward
+    ap_acc_var = float(np.var(body_acc[stab, 0]))
+    ml_acc_var = float(np.var(body_acc[stab, 1]))
+
     # Detrend yaw over the full signal before slicing the event window so that
     # slow drift accumulated before the event does not corrupt the correlation.
     lumbar_z_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
@@ -766,6 +777,8 @@ def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, fs: floa
         "weight_shift_dimensionless_jerk": dj,
         "weight_shift_log10_dimensionless_jerk": math.log10(dj) if dj > 0 else float("nan"),
         "lumbar_orientation_variability_deg": orient_var,
+        "lumbar_ap_acc_variance_g2": ap_acc_var,
+        "lumbar_ml_acc_variance_g2": ml_acc_var,
         "corrective_lumbar_angular_velocity_peak_count": peak_count,
         "largest_corrective_lumbar_angular_velocity_dps": peak_height,
     }
@@ -879,26 +892,16 @@ def make_trunk_traceability_figure(
     windows: dict[str, list[tuple[int, int, int, int, float]]],
     fs: float,
 ) -> None:
-    fig = plt.figure(figsize=(11, 8.2), constrained_layout=True)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 0.9])
-    axes = [fig.add_subplot(gs[i, 0]) for i in range(3)]
+    fig = plt.figure(figsize=(12, 8.5), constrained_layout=True)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 1.0])
+    axes = [fig.add_subplot(gs[i, 0]) for i in range(2)]
 
     for ax, label, kin in [(axes[0], "Novice", novice), (axes[1], "Trained", trained)]:
         t = kin.t
         z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
         z = lowpass_signal(z, fs, cutoff_hz=4.0)
-        # x = lowpass_signal(kin.trunk_rel_euler_deg[:, 0], fs, cutoff_hz=4.0)
-        # y = lowpass_signal(kin.trunk_rel_euler_deg[:, 1], fs, cutoff_hz=4.0)
-        # z_vel = np.gradient(z, 1.0 / fs)
         
         ax.plot(t, z, color="#1f77b4", lw=1.2, label="rel z")
-        # ax.plot(t, x, color="#9467bd", lw=1.2, label="rel x")
-        # ax.plot(t, y, color="#8c564b", lw=1.2, label="rel y")
-        
-        # ax2 = ax.twinx()
-        # ax2.plot(t, z_vel, color="#e377c2", lw=1.0, linestyle="--", label="z vel")
-        # ax2.set_ylabel("vel (deg/s)", color="#e377c2", fontsize=9)
-        # ax2.tick_params(axis='y', labelcolor="#e377c2", labelsize=8)
         
         for i, (event_start, event_end, stab_start, stab_end, peak) in enumerate(windows[label]):
             ax.axvspan(event_start / fs, event_end / fs, color="#f2b134", alpha=0.22, label="aligned event" if i == 0 else "")
@@ -910,30 +913,31 @@ def make_trunk_traceability_figure(
         ax.grid(True, color="#dddddd", lw=0.6)
         
         lines1, labels1 = ax.get_legend_handles_labels()
-        # lines2, labels2 = ax2.get_legend_handles_labels()
-        # ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=8, frameon=False, ncol=4)
+        ax.legend(lines1, labels1, loc="upper right", fontsize=8, frameon=False, ncol=4)
 
     metric_names = [
         "trunk_pelvis_lag_s",
         "weight_shift_log10_dimensionless_jerk",
         "lumbar_orientation_variability_deg",
         "corrective_lumbar_angular_velocity_peak_count",
+        "lumbar_ml_acc_variance_g2",
+        "lumbar_ap_acc_variance_g2",
     ]
-    pretty = ["coordination lag (s)", "log10 smoothness jerk", "orientation variability (deg)", "corrective peaks"]
-    x = np.arange(len(metric_names))
-    width = 0.34
-    novice_vals = [metrics.loc[metrics.trial == "Novice", m].mean() for m in metric_names]
-    trained_vals = [metrics.loc[metrics.trial == "Trained", m].mean() for m in metric_names]
-    novice_bars = axes[2].bar(x - width / 2, novice_vals, width, color="#d1495b", label="Novice")
-    trained_bars = axes[2].bar(x + width / 2, trained_vals, width, color="#2a9d8f", label="Trained")
-    axes[2].bar_label(novice_bars, fmt="%.2f", padding=3, fontsize=8)
-    axes[2].bar_label(trained_bars, fmt="%.2f", padding=3, fontsize=8)
-    axes[2].set_xticks(x)
-    axes[2].set_xticklabels(pretty, rotation=12, ha="right")
-    axes[2].set_ylabel("metric value")
-    axes[2].set_title("Raw IMU -> Madgwick orientation -> kinematic event -> balance-relevant metrics")
-    axes[2].grid(True, axis="y", color="#dddddd", lw=0.6)
-    axes[2].legend(frameon=False)
+    pretty = ["yaw lag (s)", "log10 jerk", "orient var (deg)", "corr peaks", "ML sway (g²)", "AP sway (g²)"]
+    
+    gs_bars = gs[2].subgridspec(1, len(metric_names))
+    for i, (m, p) in enumerate(zip(metric_names, pretty)):
+        ax = fig.add_subplot(gs_bars[0, i])
+        nov_val = metrics.loc[metrics.trial == "Novice", m].mean()
+        train_val = metrics.loc[metrics.trial == "Trained", m].mean()
+        
+        bars = ax.bar([0, 1], [nov_val, train_val], color=["#d1495b", "#2a9d8f"])
+        ax.bar_label(bars, fmt="%.3g", padding=3, fontsize=8)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Nov", "Train"], fontsize=9)
+        ax.set_title(p, fontsize=10)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
     fig.suptitle("Kinematic Traceability: Novice vs Trained Tai Chi", fontsize=14, fontweight="bold")
     fig.savefig(OUTPUT_DIR / "trunk_traceability_figure.png", dpi=220)
@@ -944,13 +948,14 @@ def make_trunk_traceability_figure(
 def compute_knee_balance_metrics(
     label: str,
     kin: Kinematics,
-    fs: float,
+    trial: TrialData,
     side: str,
     start: int,
     end: int,
     lag_pre_s: float = 1.0,
     lag_post_s: float = 2.0,
 ) -> dict[str, float | str]:
+    fs = trial.fs
     knee_signal = kin.left_knee_deg[:, 0] if side.lower().startswith("l") else kin.right_knee_deg[:, 0]
     knee_abs = np.abs(lowpass_signal(knee_signal, fs, cutoff_hz=6.0))
     peak_idx = start + int(np.argmax(knee_abs[start:end]))
@@ -967,8 +972,20 @@ def compute_knee_balance_metrics(
         fs,
     )
 
+    corr_pitch, lag_pitch = cross_correlation_lag(
+        highpass_detrend(kin.eulers_deg["lumbar"][:, 1], fs)[lag_start:lag_end],
+        highpass_detrend(kin.eulers_deg["chestbone"][:, 1], fs)[lag_start:lag_end],
+        fs,
+    )
+
     orientation = kin.eulers_deg["lumbar"][stab_start:stab_end,:]
     orient_var = float(np.sqrt(np.mean(np.var(orientation, axis=0))))
+
+    lumbar_acc = trial.data["lumbar"][["acc_x_g", "acc_y_g", "acc_z_g"]].to_numpy()[:len(kin.t)]
+    R_lumbar = np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]])
+    body_acc = lumbar_acc @ R_lumbar.T
+    ap_acc_var = float(np.var(body_acc[stab_start:stab_end, 0]))
+    ml_acc_var = float(np.var(body_acc[stab_start:stab_end, 1]))
     peak_count, peak_height = count_corrective_peaks(
         kin.omega_mag["lumbar"][stab_start:stab_end], fs
     )
@@ -977,14 +994,18 @@ def compute_knee_balance_metrics(
 
     return {
         "trial": label,
-        "side": side,
+        "flexed_leg": side,
+        "stance_leg": "Right" if side.lower().startswith("l") else "Left",
         "peak_knee_flexion_deg": float(knee_abs[peak_idx]),
         "peak_trunk_y_deg": float(trunk_y[peak_idx]),
         "time_to_stabilization_s": float((stab_start - peak_idx) / fs),
         "lumbar_orientation_variability_deg": orient_var,
+        "lumbar_ap_acc_variance_g2": ap_acc_var,
+        "lumbar_ml_acc_variance_g2": ml_acc_var,
         "corrective_peak_count": peak_count,
         "largest_corrective_peak_dps": peak_height,
         "trunk_pelvis_lag_s": lag,
+        "trunk_pelvis_pitch_lag_s": lag_pitch,
     }
 
 
@@ -1020,8 +1041,9 @@ def make_knee_flexion_overview_figure(
 
         seen_knee_labels: set[str] = set()
         for ev in knee_events[label]:
-            color = "#f2b134" if ev["side"] == "Left" else "#8ecae6"
-            knee_label = f"{ev['side']} flexion >60°"
+            side = ev.get("flexed_leg", ev.get("side", "Unknown"))
+            color = "#f2b134" if side == "Left" else "#8ecae6"
+            knee_label = f"{side} flexion >60°"
             knee_ax.axvspan(
                 ev["window_start_s"],
                 ev["window_end_s"],
@@ -1041,8 +1063,9 @@ def make_knee_flexion_overview_figure(
 
         seen_trunk_labels: set[str] = set()
         for ev in knee_events[label]:
-            color = "#f2b134" if ev["side"] == "Left" else "#8ecae6"
-            knee_label = f"{ev['side']} knee window"
+            side = ev.get("flexed_leg", ev.get("side", "Unknown"))
+            color = "#f2b134" if side == "Left" else "#8ecae6"
+            knee_label = f"{side} knee window"
             trunk_ax.axvspan(
                 ev["window_start_s"],
                 ev["window_end_s"],
@@ -1055,8 +1078,8 @@ def make_knee_flexion_overview_figure(
         knee_ax.legend(frameon=False, fontsize=8, ncol=3)
         trunk_ax.legend(frameon=False, fontsize=8, ncol=3)
 
-    fig.suptitle("Knee Flexion > 60° and Trunk Balance Response", fontsize=14, fontweight="bold")
-    fig.savefig(OUTPUT_DIR / "knee_flexion_balance_figure.png", dpi=220)
+    fig.suptitle("Monopodal Stance (> 60° Flexion) and Trunk Balance Response", fontsize=14, fontweight="bold")
+    fig.savefig(OUTPUT_DIR / "monopodal_stance_overview_figure.png", dpi=220)
     plt.close(fig)
 
 
@@ -1068,9 +1091,9 @@ def make_knee_traceability_figure(
     knee_events: dict[str, list[dict[str, float | str]]],
     fs: float,
 ) -> None:
-    fig = plt.figure(figsize=(11, 8.5), constrained_layout=True)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 0.9])
-    axes = [fig.add_subplot(gs[i, 0]) for i in range(3)]
+    fig = plt.figure(figsize=(13, 8.8), constrained_layout=True)
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 1.0])
+    axes = [fig.add_subplot(gs[i, 0]) for i in range(2)]
 
     for ax, label, kin in [
         (axes[0], "Novice", novice),
@@ -1120,55 +1143,42 @@ def make_knee_traceability_figure(
 
     metric_names = [
         "time_to_stabilization_s",
+        "lumbar_ml_acc_variance_g2",
         "lumbar_orientation_variability_deg",
         "corrective_peak_count",
         "trunk_pelvis_lag_s",
-        "peak_trunk_y_deg",
+        "trunk_pelvis_pitch_lag_s",
     ]
 
     pretty = [
-        "stabilization time (s)",
-        "orientation variability (deg)",
-        "corrective peaks",
-        "trunk-pelvis lag (s)",
-        "peak trunk y (deg)",
+        "stab. time (s)",
+        "ML sway (g²)",
+        "orient var (deg)",
+        "corr peaks",
+        "yaw lag (s)",
+        "pitch lag (s)",
     ]
 
-    novice_vals = [
-        knee_metrics.loc[knee_metrics.trial == "Novice", m].mean()
-        for m in metric_names
-    ]
-    trained_vals = [
-        knee_metrics.loc[knee_metrics.trial == "Trained", m].mean()
-        for m in metric_names
-    ]
-
-    x = np.arange(len(metric_names))
-    width = 0.34
-
-    novice_bars = axes[2].bar(
-        x - width / 2, novice_vals, width, color="#d1495b", label="Novice"
-    )
-    trained_bars = axes[2].bar(
-        x + width / 2, trained_vals, width, color="#2a9d8f", label="Trained"
-    )
-
-    axes[2].bar_label(novice_bars, fmt="%.2f", padding=3, fontsize=8)
-    axes[2].bar_label(trained_bars, fmt="%.2f", padding=3, fontsize=8)
-
-    axes[2].set_xticks(x)
-    axes[2].set_xticklabels(pretty, rotation=12, ha="right")
-    axes[2].set_ylabel("metric value")
-    axes[2].set_title("Balance metrics during deep knee flexion (>60°)")
-    axes[2].grid(True, axis="y", color="#dddddd", lw=0.6)
-    axes[2].legend(frameon=False)
+    gs_bars = gs[2].subgridspec(1, len(metric_names))
+    for i, (m, p) in enumerate(zip(metric_names, pretty)):
+        ax = fig.add_subplot(gs_bars[0, i])
+        nov_val = knee_metrics.loc[knee_metrics.trial == "Novice", m].mean()
+        train_val = knee_metrics.loc[knee_metrics.trial == "Trained", m].mean()
+        
+        bars = ax.bar([0, 1], [nov_val, train_val], color=["#d1495b", "#2a9d8f"])
+        ax.bar_label(bars, fmt="%.3g", padding=3, fontsize=8)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Nov", "Train"], fontsize=9)
+        ax.set_title(p, fontsize=10)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
     fig.suptitle(
-        "Knee Flexion Balance Traceability: Novice vs Trained Tai Chi",
+        "Monopodal Stance Balance Traceability: Novice vs Trained Tai Chi",
         fontsize=14,
         fontweight="bold",
     )
-    fig.savefig(OUTPUT_DIR / "knee_traceability_figure.png", dpi=220)
+    fig.savefig(OUTPUT_DIR / "monopodal_stance_traceability_figure.png", dpi=220)
     plt.close(fig)
 
 
@@ -1240,8 +1250,8 @@ def main() -> None:
         trunk_event_windows["Novice"].append((novice_start, novice_end, novice_stab_start, novice_stab_end, novice_peak))
         trunk_event_windows["Trained"].append((trained_start, trained_end, trained_stab_start, trained_stab_end, np.nan))
 
-        trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Novice", novice_kin, novice_trial.fs, novice_start, novice_end, novice_stab_start, novice_stab_end))
-        trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Trained", trained_kin, trained_trial.fs, trained_start, trained_end, trained_stab_start, trained_stab_end))
+        trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Novice", novice_kin, novice_trial, novice_start, novice_end, novice_stab_start, novice_stab_end))
+        trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Trained", trained_kin, trained_trial, trained_start, trained_end, trained_stab_start, trained_stab_end))
 
     trunk_event_rows = []
     for label, events in trunk_event_windows.items():
@@ -1277,21 +1287,23 @@ def main() -> None:
                 knee_events[label].append(event)
 
     knee_balance_rows = []
-    for label, kin, fs in [("Novice", novice_kin, novice_trial.fs), ("Trained", trained_kin, trained_trial.fs)]:
+    for label, kin, trial in [("Novice", novice_kin, novice_trial), ("Trained", trained_kin, trained_trial)]:
+        fs = trial.fs
         for ev in knee_events[label]:
             start = int(ev["window_start_s"] * fs)
             end = int(ev["window_end_s"] * fs)
             knee_balance_rows.append(
-                compute_knee_balance_metrics(label, kin, fs, ev["side"], start, end)
+                compute_knee_balance_metrics(label, kin, trial, ev.get("flexed_leg", ev.get("side")), start, end)
             )
 
     knee_metrics = pd.DataFrame(knee_balance_rows)
-    knee_metrics.to_csv(OUTPUT_DIR / "knee_flexion_balance_metrics.csv", index=False)
+    knee_metrics.to_csv(OUTPUT_DIR / "monopodal_stance_balance_metrics.csv", index=False)
     pd.DataFrame(
         [
             {
                 "trial": ev["trial"],
-                "side": ev["side"],
+                "flexed_leg": ev.get("flexed_leg", ev.get("side")),
+                "stance_leg": ev.get("stance_leg", "Unknown"),
                 "window_start_s": ev["window_start_s"],
                 "window_end_s": ev["window_end_s"],
                 "peak_time_s": ev["peak_time_s"],
@@ -1299,7 +1311,7 @@ def main() -> None:
             }
             for ev in knee_event_rows
         ]
-    ).to_csv(OUTPUT_DIR / "knee_flexion_event_windows.csv", index=False)
+    ).to_csv(OUTPUT_DIR / "monopodal_stance_event_windows.csv", index=False)
 
     # ------------------------------------------------------------------
     # 5. Generate figures
@@ -1318,14 +1330,34 @@ def main() -> None:
     print("\nTrunk rotation balance metrics:")
     print(trunk_metrics.to_string(index=False))
     if len(knee_metrics) > 0:
-        print("\nKnee-flexion balance metrics:")
+        print("\nMonopodal stance balance metrics:")
         print(knee_metrics.to_string(index=False))
+        
+        # Calculate Asymmetry
+        agg = knee_metrics.groupby(["trial", "stance_leg"]).mean(numeric_only=True).reset_index()
+        asym_rows = []
+        for tr in ["Novice", "Trained"]:
+            tr_data = agg[agg.trial == tr]
+            if len(tr_data) == 2:
+                left = tr_data[tr_data.stance_leg == "Left"].iloc[0]
+                right = tr_data[tr_data.stance_leg == "Right"].iloc[0]
+                asym_rows.append({
+                    "trial": tr,
+                    "peak_knee_flexion_diff_deg": abs(left["peak_knee_flexion_deg"] - right["peak_knee_flexion_deg"]),
+                    "time_to_stabilization_diff_s": abs(left["time_to_stabilization_s"] - right["time_to_stabilization_s"]),
+                    "lumbar_ml_acc_variance_diff_g2": abs(left["lumbar_ml_acc_variance_g2"] - right["lumbar_ml_acc_variance_g2"]),
+                })
+        if asym_rows:
+            asym_df = pd.DataFrame(asym_rows)
+            asym_df.to_csv(OUTPUT_DIR / "monopodal_stance_asymmetry_metrics.csv", index=False)
+            print("\nLeft-Right Asymmetry (Absolute Difference between Stance Legs):")
+            print(asym_df.to_string(index=False))
     else:
-        print("\nKnee-flexion balance analysis: no windows exceeded 60°.")
+        print("\nMonopodal stance balance analysis: no windows exceeded 60°.")
     print(f"\nOrientation validation figure: {OUTPUT_DIR / 'orientation_validation.png'}")
     print(f"Trunk traceability figure:     {OUTPUT_DIR / 'trunk_traceability_figure.png'}")
-    print(f"Knee flexion overview figure:  {OUTPUT_DIR / 'knee_flexion_balance_figure.png'}")
-    print(f"Knee traceability figure:      {OUTPUT_DIR / 'knee_traceability_figure.png'}")
+    print(f"Monopodal stance overview figure: {OUTPUT_DIR / 'monopodal_stance_overview_figure.png'}")
+    print(f"Monopodal stance traceability figure: {OUTPUT_DIR / 'monopodal_stance_traceability_figure.png'}")
 
 if __name__ == "__main__":
     main()

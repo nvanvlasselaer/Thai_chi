@@ -333,11 +333,11 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "npz_path", nargs="?", default="outputs/orientation_novice.npz",
+        "npz_path", nargs="?", default="outputs/orientation_trained.npz",
         help="Path to orientation .npz file"
     )
     parser.add_argument(
-        "output_path", nargs="?", default="outputs/animation_novice.mp4",
+        "output_path", nargs="?", default="outputs/animation_trained.mp4",
         help="Path to output .mp4 file"
     )
     parser.add_argument("--start", type=float, default=0.0, help="Start time (s)")
