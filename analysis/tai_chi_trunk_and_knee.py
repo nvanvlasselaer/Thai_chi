@@ -939,7 +939,7 @@ def make_trunk_traceability_figure(
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-    fig.suptitle("Kinematic Traceability: Novice vs Trained Tai Chi", fontsize=14, fontweight="bold")
+    fig.suptitle("Trunk Rotation Balance Traceability: Novice vs Trained Tai Chi", fontsize=14, fontweight="bold")
     fig.savefig(OUTPUT_DIR / "trunk_traceability_figure.png", dpi=220)
     plt.close(fig)
 
