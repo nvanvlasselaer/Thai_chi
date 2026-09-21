@@ -1,0 +1,477 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-09-21T21:24:51+00:00",
+  "modified_utc": "2026-09-21T21:24:54+00:00",
+  "fs": {
+    "Novice": 370.3704,
+    "Trained": 370.3704
+  },
+  "n_samples": {
+    "Novice": 89425,
+    "Trained": 87515
+  },
+  "ignore_high_pass_filter": true,
+  "detector": {
+    "trunk_n_events": 6,
+    "trunk_rel_threshold": 0.15,
+    "trunk_floor_percentile": 40.0,
+    "trunk_peak_percentile": 90.0,
+    "trunk_peak_separation_s": 2.0,
+    "trunk_min_duration_s": 1.5,
+    "trunk_max_duration_s": 20.0,
+    "trunk_min_excursion_deg": 8.0,
+    "trunk_envelope_cutoff_hz": 1.5,
+    "trunk_yaw_cutoff_hz": 4.0,
+    "stab_min_duration_s": 3.0,
+    "stab_horizon_s": 10.0,
+    "stab_latency_weight": 0.35,
+    "stab_baseline_percentile": 20.0,
+    "stab_low_confidence_ratio": 1.6,
+    "stab_omega_cutoff_hz": 4.0
+  },
+  "lag_pad_s": 2.0,
+  "knee_lag_window_s": [
+    2.0,
+    3.0
+  ],
+  "trunk_events": [
+    {
+      "event_id": "trunk-01",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 18885,
+          "event_end": 19891,
+          "stab_start": 20011,
+          "stab_end": 21122,
+          "event_start_s": 50.9895,
+          "event_end_s": 53.7057,
+          "stab_start_s": 54.0297,
+          "stab_end_s": 57.0294,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.121
+        },
+        "Trained": {
+          "event_start": 14099,
+          "event_end": 16039,
+          "stab_start": 16039,
+          "stab_end": 17150,
+          "event_start_s": 38.0673,
+          "event_end_s": 43.3053,
+          "stab_start_s": 43.3053,
+          "stab_end_s": 46.305,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.999
+        }
+      }
+    },
+    {
+      "event_id": "trunk-02",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 24731,
+          "event_end": 25942,
+          "stab_start": 25942,
+          "stab_end": 27053,
+          "event_start_s": 66.7737,
+          "event_end_s": 70.0434,
+          "stab_start_s": 70.0434,
+          "stab_end_s": 73.0431,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.947
+        },
+        "Trained": {
+          "event_start": 17697,
+          "event_end": 18616,
+          "stab_start": 18810,
+          "stab_end": 19921,
+          "event_start_s": 47.7819,
+          "event_end_s": 50.2632,
+          "stab_start_s": 50.787,
+          "stab_end_s": 53.7867,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.323
+        }
+      }
+    },
+    {
+      "event_id": "trunk-03",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 32793,
+          "event_end": 34263,
+          "stab_start": 34263,
+          "stab_end": 35374,
+          "event_start_s": 88.5411,
+          "event_end_s": 92.5101,
+          "stab_start_s": 92.5101,
+          "stab_end_s": 95.5098,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.575
+        },
+        "Trained": {
+          "event_start": 21451,
+          "event_end": 22629,
+          "stab_start": 22629,
+          "stab_end": 23740,
+          "event_start_s": 57.9177,
+          "event_end_s": 61.0983,
+          "stab_start_s": 61.0983,
+          "stab_end_s": 64.098,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.528
+        }
+      }
+    },
+    {
+      "event_id": "trunk-04",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 36140,
+          "event_end": 37108,
+          "stab_start": 37108,
+          "stab_end": 38219,
+          "event_start_s": 97.578,
+          "event_end_s": 100.1916,
+          "stab_start_s": 100.1916,
+          "stab_end_s": 103.1913,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.295
+        },
+        "Trained": {
+          "event_start": 23298,
+          "event_end": 24714,
+          "stab_start": 24714,
+          "stab_end": 25825,
+          "event_start_s": 62.9046,
+          "event_end_s": 66.7278,
+          "stab_start_s": 66.7278,
+          "stab_end_s": 69.7275,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.836
+        }
+      }
+    },
+    {
+      "event_id": "trunk-05",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 37453,
+          "event_end": 40348,
+          "stab_start": 40348,
+          "stab_end": 41459,
+          "event_start_s": 101.1231,
+          "event_end_s": 108.9396,
+          "stab_start_s": 108.9396,
+          "stab_end_s": 111.9393,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.454
+        },
+        "Trained": {
+          "event_start": 31332,
+          "event_end": 33094,
+          "stab_start": 33577,
+          "stab_end": 34688,
+          "event_start_s": 84.5964,
+          "event_end_s": 89.3538,
+          "stab_start_s": 90.6579,
+          "stab_end_s": 93.6576,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.366
+        }
+      }
+    },
+    {
+      "event_id": "trunk-06",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 63325,
+          "event_end": 64119,
+          "stab_start": 64844,
+          "stab_end": 65955,
+          "event_start_s": 170.9775,
+          "event_end_s": 173.1213,
+          "stab_start_s": 175.0788,
+          "stab_end_s": 178.0785,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.001
+        },
+        "Trained": {
+          "event_start": 66957,
+          "event_end": 67988,
+          "stab_start": 67988,
+          "stab_end": 69099,
+          "event_start_s": 180.7839,
+          "event_end_s": 183.5676,
+          "stab_start_s": 183.5676,
+          "stab_end_s": 186.5673,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.167
+        }
+      }
+    }
+  ],
+  "knee_events": [
+    {
+      "event_id": "knee-01",
+      "trial": "Novice",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 47073,
+      "event_end": 48565,
+      "stab_start": 47739,
+      "stab_end": 48850,
+      "event_start_s": 127.0971,
+      "event_end_s": 131.1255,
+      "stab_start_s": 128.8953,
+      "stab_end_s": 131.895,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.322
+    },
+    {
+      "event_id": "knee-02",
+      "trial": "Novice",
+      "flexed_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "event_start": 50005,
+      "event_end": 51411,
+      "stab_start": 50439,
+      "stab_end": 51550,
+      "event_start_s": 135.0135,
+      "event_end_s": 138.8097,
+      "stab_start_s": 136.1853,
+      "stab_end_s": 139.185,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.146
+    },
+    {
+      "event_id": "knee-03",
+      "trial": "Novice",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 52934,
+      "event_end": 53812,
+      "stab_start": 53410,
+      "stab_end": 54521,
+      "event_start_s": 142.9218,
+      "event_end_s": 145.2924,
+      "stab_start_s": 144.207,
+      "stab_end_s": 147.2067,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.463
+    },
+    {
+      "event_id": "knee-04",
+      "trial": "Novice",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 54466,
+      "event_end": 54871,
+      "stab_start": 54693,
+      "stab_end": 55804,
+      "event_start_s": 147.0582,
+      "event_end_s": 148.1517,
+      "stab_start_s": 147.6711,
+      "stab_end_s": 150.6708,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.106
+    },
+    {
+      "event_id": "knee-05",
+      "trial": "Novice",
+      "flexed_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "event_start": 56515,
+      "event_end": 57465,
+      "stab_start": 57026,
+      "stab_end": 58137,
+      "event_start_s": 152.5905,
+      "event_end_s": 155.1555,
+      "stab_start_s": 153.9702,
+      "stab_end_s": 156.9699,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.39
+    },
+    {
+      "event_id": "knee-06",
+      "trial": "Trained",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 45580,
+      "event_end": 47238,
+      "stab_start": 46039,
+      "stab_end": 47150,
+      "event_start_s": 123.066,
+      "event_end_s": 127.5426,
+      "stab_start_s": 124.3053,
+      "stab_end_s": 127.305,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.072
+    },
+    {
+      "event_id": "knee-07",
+      "trial": "Trained",
+      "flexed_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "event_start": 48625,
+      "event_end": 50158,
+      "stab_start": 49013,
+      "stab_end": 50124,
+      "event_start_s": 131.2875,
+      "event_end_s": 135.4266,
+      "stab_start_s": 132.3351,
+      "stab_end_s": 135.3348,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.038
+    },
+    {
+      "event_id": "knee-08",
+      "trial": "Trained",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 51657,
+      "event_end": 52453,
+      "stab_start": 52090,
+      "stab_end": 53201,
+      "event_start_s": 139.4739,
+      "event_end_s": 141.6231,
+      "stab_start_s": 140.643,
+      "stab_end_s": 143.6427,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.509
+    },
+    {
+      "event_id": "knee-09",
+      "trial": "Trained",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "event_start": 53229,
+      "event_end": 53643,
+      "stab_start": 53473,
+      "stab_end": 54584,
+      "event_start_s": 143.7183,
+      "event_end_s": 144.8361,
+      "stab_start_s": 144.3771,
+      "stab_end_s": 147.3768,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.043
+    },
+    {
+      "event_id": "knee-10",
+      "trial": "Trained",
+      "flexed_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "event_start": 55621,
+      "event_end": 56233,
+      "stab_start": 56110,
+      "stab_end": 57221,
+      "event_start_s": 150.1767,
+      "event_end_s": 151.8291,
+      "stab_start_s": 151.497,
+      "stab_end_s": 154.4967,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.307
+    },
+    {
+      "event_id": "knee-11",
+      "trial": "Trained",
+      "flexed_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "event_start": 57365,
+      "event_end": 57614,
+      "stab_start": 57509,
+      "stab_end": 58620,
+      "event_start_s": 154.8855,
+      "event_end_s": 155.5578,
+      "stab_start_s": 155.2743,
+      "stab_end_s": 158.274,
+      "source": {
+        "event": "auto",
+        "stab": "auto"
+      },
+      "stab_quiet_ratio": 1.13
+    }
+  ]
+}
