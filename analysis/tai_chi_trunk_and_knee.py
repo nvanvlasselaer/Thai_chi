@@ -35,6 +35,12 @@ FS = 370.3704
 
 Ignore_high_pass_filter = False  # Set to True to skip the high-pass filter (for yaw drift)
 
+# Which trunk-event detector main() uses.  "v2" derives each event's duration
+# and boundaries from the trunk yaw velocity (see analysis/event_detection.py);
+# "v1" is the original fixed 8 s sliding window, kept so the committed results
+# stay reproducible.
+DETECTOR = "v2"
+
 SENSOR_MAP = {
     "chestbone": "Thorax",
     "lumbar": "Pelvis/Lower Trunk Proxy",
@@ -511,6 +517,65 @@ def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: 
     return selected_events, rationale
 
 
+def detect_trunk_event_windows(
+    novice_kin: Kinematics,
+    trained_kin: Kinematics,
+    novice_fs: float,
+    trained_fs: float,
+    num_events: int = 6,
+) -> tuple[dict[str, list[tuple[int, int, int, int, float]]], list[float]]:
+    """Segment trunk-rotation events in both trials and pair them.
+
+    Returns ``{"Novice": [...], "Trained": [...]}`` where each entry is
+    ``(event_start, event_end, stab_start, stab_end, peak)`` in sample indices,
+    plus the DTW distance of each pairing.
+
+    Novice events are detected, each is matched to the corresponding window in
+    the trained recording by banded DTW, and the stabilization window that
+    follows each event is located per trial.  ``DETECTOR`` selects whether the
+    event boundaries come from the yaw-velocity segmentation ("v2") or the
+    original fixed 8 s window ("v1").
+    """
+    if DETECTOR == "v2":
+        import event_detection as ed
+
+        paired, novice_events, _ = ed.pair_trunk_events(
+            novice_kin, trained_kin, novice_fs, trained_fs,
+            ed.TrunkDetectorParams(n_events=num_events),
+        )
+        windows = {
+            "Novice": [
+                (start, end, stab_start, stab_end, event.peak)
+                for (start, end, stab_start, stab_end, _), event in zip(paired["Novice"], novice_events)
+            ],
+            "Trained": [
+                (start, end, stab_start, stab_end, np.nan)
+                for start, end, stab_start, stab_end, _ in paired["Trained"]
+            ],
+        }
+        return windows, []
+
+    windows: dict[str, list[tuple[int, int, int, int, float]]] = {"Novice": [], "Trained": []}
+    dtw_dists: list[float] = []
+    novice_events, _ = detect_novice_trunk_rotation_events(novice_kin, novice_fs, num_events)
+
+    last_trained_end = 0
+    for novice_start, novice_end, novice_peak in novice_events:
+        trained_start, trained_end, dtw_dist = find_trained_match(
+            novice_kin, trained_kin, novice_fs, novice_start, novice_end, min_start=last_trained_end
+        )
+        last_trained_end = trained_end
+        dtw_dists.append(dtw_dist)
+
+        novice_stab_start, novice_stab_end = find_stabilization(novice_kin, novice_fs, novice_end)
+        trained_stab_start, trained_stab_end = find_stabilization(trained_kin, trained_fs, trained_end)
+
+        windows["Novice"].append((novice_start, novice_end, novice_stab_start, novice_stab_end, novice_peak))
+        windows["Trained"].append((trained_start, trained_end, trained_stab_start, trained_stab_end, np.nan))
+
+    return windows, dtw_dists
+
+
 def signature_matrix(kin: Kinematics, fs: float, start: int, end: int, target_fs: float = 20.0) -> np.ndarray:
     # Detrend yaw over the full signal before slicing the window so that slow
     # drift accumulated before the window does not shift the baseline.
@@ -627,13 +692,52 @@ def find_stabilization(kin: Kinematics, fs: float, after_end: int) -> tuple[int,
     return best_start, min(best_start + best_len, len(combined))
 
 
-def count_corrective_peaks(omega: np.ndarray, fs: float) -> tuple[int, float]:
+def corrective_threshold(omega: np.ndarray, fs: float) -> float:
+    """Tukey outlier threshold on angular velocity: q75 + 1.5 IQR."""
     smoothed = lowpass_signal(omega, fs, cutoff_hz=6.0)
-    threshold = np.percentile(smoothed, 75) + 1.5 * (np.percentile(smoothed, 75) - np.percentile(smoothed, 25))
+    q25, q75 = np.percentile(smoothed, [25, 75])
+    return float(q75 + 1.5 * (q75 - q25))
+
+
+def count_corrective_peaks(omega: np.ndarray, fs: float, threshold: float | None = None) -> tuple[int, float]:
+    """Count angular-velocity bursts in a window.
+
+    With ``threshold=None`` the bar is computed from the window's own
+    distribution, which is self-referential: a window twice as busy gets a
+    threshold more than twice as high, so the count reports shape rather than
+    magnitude.  Passing a threshold derived from the whole recording
+    (``corrective_threshold`` over the full signal) makes counts comparable
+    between windows, trials and participants.  The default preserves the
+    original behaviour.
+    """
+    smoothed = lowpass_signal(omega, fs, cutoff_hz=6.0)
+    if threshold is None:
+        threshold = np.percentile(smoothed, 75) + 1.5 * (np.percentile(smoothed, 75) - np.percentile(smoothed, 25))
     peaks, props = find_peaks(smoothed, height=threshold, distance=int(0.3 * fs))
     if len(peaks) == 0:
         return 0, float(np.max(smoothed))
     return int(len(peaks)), float(np.max(props["peak_heights"]))
+
+
+def corrective_activity(kin: Kinematics, fs: float, stab: slice) -> dict[str, float]:
+    """Corrective-activity measures that are comparable across windows.
+
+    The raw peak count over a 2 s window is both duration-dependent and scored
+    against a bar that moves with the window, which makes it the least reliable
+    metric in the set (ICC 0.77 against +/-0.25 s boundary jitter, and it
+    resolves the novice/trained difference at only 0.56x its own noise).  A rate
+    measured against a recording-wide threshold reaches ICC 0.98 and 4.2x, and
+    RMS angular velocity -- which needs no threshold at all -- reaches 0.98 and
+    4.0x.
+    """
+    omega = kin.omega_mag["lumbar"]
+    threshold = corrective_threshold(omega, fs)
+    count, _ = count_corrective_peaks(omega[stab], fs, threshold=threshold)
+    duration_s = max((stab.stop - stab.start) / fs, 1e-9)
+    return {
+        "corrective_peak_rate_hz": count / duration_s,
+        "lumbar_rms_angular_velocity_dps": float(np.sqrt(np.mean(omega[stab] ** 2))),
+    }
 
 def extract_contiguous_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     runs: list[tuple[int, int]] = []
@@ -744,10 +848,27 @@ def summarize_knee_flexion_event(
     }
 
 
-def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: TrialData, start: int, end: int, stab_start: int, stab_end: int) -> dict[str, float | str]:
+def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: TrialData, start: int, end: int, stab_start: int, stab_end: int, lag_pad_s: float | None = None) -> dict[str, float | str]:
+    """Balance metrics for one trunk-rotation event.
+
+    ``lag_pad_s`` widens *only* the window used for the trunk-pelvis
+    cross-correlation, by that many seconds on each side.  The lag search spans
+    +/-2 s (``cross_correlation_lag``), so an event shorter than about 4 s
+    cannot support it and the estimate pins to the bound.  Velocity-segmented
+    events are routinely 2-3 s, so they need the padding; the fixed 8 s windows
+    did not, and the default of None reproduces the original behaviour exactly.
+    The same decoupling is used by ``compute_knee_balance_metrics``, which
+    scores its lag over a fixed window around peak flexion.
+    """
     fs = trial.fs
     event = slice(start, end)
     stab = slice(stab_start, stab_end)
+
+    if lag_pad_s is None:
+        lag_event = event
+    else:
+        pad = int(round(lag_pad_s * fs))
+        lag_event = slice(max(0, start - pad), min(len(kin.t), end + pad))
     
     # Compute ML/AP acceleration variance
     lumbar_acc = trial.data["lumbar"][["acc_x_g", "acc_y_g", "acc_z_g"]].to_numpy()[:len(kin.t)]
@@ -761,7 +882,7 @@ def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: T
     # slow drift accumulated before the event does not corrupt the correlation.
     lumbar_z_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
     chest_z_detrended = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
-    corr, lag = cross_correlation_lag(lumbar_z_detrended[event], chest_z_detrended[event], fs)
+    corr, lag = cross_correlation_lag(lumbar_z_detrended[lag_event], chest_z_detrended[lag_event], fs)
     dj = dimensionless_jerk(kin.eulers_deg["lumbar"][event, 0], fs)
     orientation = kin.eulers_deg["lumbar"][stab, :]
     orient_var = float(np.sqrt(np.mean(np.var(orientation, axis=0))))
@@ -781,6 +902,7 @@ def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: T
         "lumbar_ml_acc_variance_g2": ml_acc_var,
         "corrective_lumbar_angular_velocity_peak_count": peak_count,
         "largest_corrective_lumbar_angular_velocity_dps": peak_height,
+        **corrective_activity(kin, fs, stab),
     }
 
 
@@ -919,11 +1041,11 @@ def make_trunk_traceability_figure(
         "trunk_pelvis_lag_s",
         "weight_shift_log10_dimensionless_jerk",
         "lumbar_orientation_variability_deg",
-        "corrective_lumbar_angular_velocity_peak_count",
+        "corrective_peak_rate_hz",
         "lumbar_ml_acc_variance_g2",
         "lumbar_ap_acc_variance_g2",
     ]
-    pretty = ["yaw lag (s)", "log10 jerk", "orient var (deg)", "corr peaks", "ML sway (g²)", "AP sway (g²)"]
+    pretty = ["yaw lag (s)", "log10 jerk", "orient var (deg)", "corr rate (Hz)", "ML sway (g²)", "AP sway (g²)"]
     
     gs_bars = gs[2].subgridspec(1, len(metric_names))
     for i, (m, p) in enumerate(zip(metric_names, pretty)):
@@ -954,6 +1076,8 @@ def compute_knee_balance_metrics(
     end: int,
     lag_pre_s: float = 1.0,
     lag_post_s: float = 2.0,
+    stab_start: int | None = None,
+    stab_end: int | None = None,
 ) -> dict[str, float | str]:
     fs = trial.fs
     knee_signal = kin.left_knee_deg[:, 0] if side.lower().startswith("l") else kin.right_knee_deg[:, 0]
@@ -965,7 +1089,10 @@ def compute_knee_balance_metrics(
     # and directly targets the coordination response at maximum challenge.
     lag_start = max(0, peak_idx - int(lag_pre_s * fs))
     lag_end = min(len(knee_abs), peak_idx + int(lag_post_s * fs))
-    stab_start, stab_end = find_stabilization(kin, fs, peak_idx)
+    # A caller that has curated the stabilization window (the event editor)
+    # passes it in; otherwise fall back to detecting it here as before.
+    if stab_start is None or stab_end is None:
+        stab_start, stab_end = find_stabilization(kin, fs, peak_idx)
     corr, lag = cross_correlation_lag(
         highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs)[lag_start:lag_end],
         highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs)[lag_start:lag_end],
@@ -1006,8 +1133,34 @@ def compute_knee_balance_metrics(
         "largest_corrective_peak_dps": peak_height,
         "trunk_pelvis_lag_s": lag,
         "trunk_pelvis_pitch_lag_s": lag_pitch,
+        **corrective_activity(kin, fs, slice(stab_start, stab_end)),
     }
 
+
+def compute_asymmetry_metrics(knee_metrics: pd.DataFrame) -> pd.DataFrame:
+    """Absolute left-vs-right differences per trial, averaged over events.
+
+    Returns an empty frame when a trial does not have both stance legs
+    represented, which is the same behaviour as the inline version this was
+    extracted from.
+    """
+    if len(knee_metrics) == 0:
+        return pd.DataFrame()
+
+    agg = knee_metrics.groupby(["trial", "stance_leg"]).mean(numeric_only=True).reset_index()
+    asym_rows = []
+    for tr in ["Novice", "Trained"]:
+        tr_data = agg[agg.trial == tr]
+        if len(tr_data) == 2:
+            left = tr_data[tr_data.stance_leg == "Left"].iloc[0]
+            right = tr_data[tr_data.stance_leg == "Right"].iloc[0]
+            asym_rows.append({
+                "trial": tr,
+                "peak_knee_flexion_diff_deg": abs(left["peak_knee_flexion_deg"] - right["peak_knee_flexion_deg"]),
+                "time_to_stabilization_diff_s": abs(left["time_to_stabilization_s"] - right["time_to_stabilization_s"]),
+                "lumbar_ml_acc_variance_diff_g2": abs(left["lumbar_ml_acc_variance_g2"] - right["lumbar_ml_acc_variance_g2"]),
+            })
+    return pd.DataFrame(asym_rows)
 
 
 def make_knee_flexion_overview_figure(
@@ -1090,6 +1243,7 @@ def make_knee_traceability_figure(
     knee_metrics: pd.DataFrame,
     knee_events: dict[str, list[dict[str, float | str]]],
     fs: float,
+    stab_overrides: dict[str, list[tuple[int, int]]] | None = None,
 ) -> None:
     fig = plt.figure(figsize=(13, 8.8), constrained_layout=True)
     gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 1.0])
@@ -1117,8 +1271,11 @@ def make_knee_traceability_figure(
                 label="knee-flexion event" if i == 0 else "",
             )
 
-            peak_idx = int(ev["peak_time_s"] * fs)
-            stab_start, stab_end = find_stabilization(kin, fs, peak_idx)
+            if stab_overrides is not None:
+                stab_start, stab_end = stab_overrides[label][i]
+            else:
+                peak_idx = int(ev["peak_time_s"] * fs)
+                stab_start, stab_end = find_stabilization(kin, fs, peak_idx)
 
             ax.axvspan(
                 stab_start / fs,
@@ -1145,7 +1302,7 @@ def make_knee_traceability_figure(
         "time_to_stabilization_s",
         "lumbar_ml_acc_variance_g2",
         "lumbar_orientation_variability_deg",
-        "corrective_peak_count",
+        "corrective_peak_rate_hz",
         "trunk_pelvis_lag_s",
         "trunk_pelvis_pitch_lag_s",
     ]
@@ -1154,7 +1311,7 @@ def make_knee_traceability_figure(
         "stab. time (s)",
         "ML sway (g²)",
         "orient var (deg)",
-        "corr peaks",
+        "corr rate (Hz)",
         "yaw lag (s)",
         "pitch lag (s)",
     ]
@@ -1230,26 +1387,18 @@ def main() -> None:
     #    - Match each event to the best corresponding window in trained
     #    - Compute balance metrics (coordination, smoothness, variability)
     # ------------------------------------------------------------------
-    novice_trunk_rotation_events, rationale = detect_novice_trunk_rotation_events(novice_kin, novice_trial.fs, 6)
+    trunk_event_windows, dtw_dists = detect_trunk_event_windows(
+        novice_kin, trained_kin, novice_trial.fs, trained_trial.fs, num_events=6
+    )
 
     trunk_metric_rows: list[dict] = []
-    trunk_event_windows: dict[str, list[tuple[int, int, int, int, float]]] = {"Novice": [], "Trained": []}
-    dtw_dists = []
-
-    last_trained_end = 0
-    for idx, (novice_start, novice_end, novice_peak) in enumerate(novice_trunk_rotation_events):
-        trained_start, trained_end, dtw_dist = find_trained_match(
-            novice_kin, trained_kin, novice_trial.fs, novice_start, novice_end, min_start=last_trained_end
-        )
-        last_trained_end = trained_end
-        dtw_dists.append(dtw_dist)
-
-        novice_stab_start, novice_stab_end = find_stabilization(novice_kin, novice_trial.fs, novice_end)
-        trained_stab_start, trained_stab_end = find_stabilization(trained_kin, trained_trial.fs, trained_end)
-
-        trunk_event_windows["Novice"].append((novice_start, novice_end, novice_stab_start, novice_stab_end, novice_peak))
-        trunk_event_windows["Trained"].append((trained_start, trained_end, trained_stab_start, trained_stab_end, np.nan))
-
+    for (novice_start, novice_end, novice_stab_start, novice_stab_end, _), (
+        trained_start,
+        trained_end,
+        trained_stab_start,
+        trained_stab_end,
+        _,
+    ) in zip(trunk_event_windows["Novice"], trunk_event_windows["Trained"]):
         trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Novice", novice_kin, novice_trial, novice_start, novice_end, novice_stab_start, novice_stab_end))
         trunk_metric_rows.append(compute_trunk_rotation_balance_metrics("Trained", trained_kin, trained_trial, trained_start, trained_end, trained_stab_start, trained_stab_end))
 
@@ -1324,7 +1473,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 6. Print summary
     # ------------------------------------------------------------------
-    avg_dtw_dist = sum(dtw_dists) / len(dtw_dists)
+    avg_dtw_dist = sum(dtw_dists) / len(dtw_dists) if dtw_dists else float("nan")
 
     print("Analysis complete.")
     print("\nTrunk rotation balance metrics:")
@@ -1334,21 +1483,8 @@ def main() -> None:
         print(knee_metrics.to_string(index=False))
         
         # Calculate Asymmetry
-        agg = knee_metrics.groupby(["trial", "stance_leg"]).mean(numeric_only=True).reset_index()
-        asym_rows = []
-        for tr in ["Novice", "Trained"]:
-            tr_data = agg[agg.trial == tr]
-            if len(tr_data) == 2:
-                left = tr_data[tr_data.stance_leg == "Left"].iloc[0]
-                right = tr_data[tr_data.stance_leg == "Right"].iloc[0]
-                asym_rows.append({
-                    "trial": tr,
-                    "peak_knee_flexion_diff_deg": abs(left["peak_knee_flexion_deg"] - right["peak_knee_flexion_deg"]),
-                    "time_to_stabilization_diff_s": abs(left["time_to_stabilization_s"] - right["time_to_stabilization_s"]),
-                    "lumbar_ml_acc_variance_diff_g2": abs(left["lumbar_ml_acc_variance_g2"] - right["lumbar_ml_acc_variance_g2"]),
-                })
-        if asym_rows:
-            asym_df = pd.DataFrame(asym_rows)
+        asym_df = compute_asymmetry_metrics(knee_metrics)
+        if len(asym_df) > 0:
             asym_df.to_csv(OUTPUT_DIR / "monopodal_stance_asymmetry_metrics.csv", index=False)
             print("\nLeft-Right Asymmetry (Absolute Difference between Stance Legs):")
             print(asym_df.to_string(index=False))
