@@ -25,28 +25,43 @@ The software places both windows automatically, and gets most of them approximat
 
 ```
 ┌────────────────────┬───────────────────────────────────────────────────────┐
-│ DETECTOR           │  Tai Chi event editor                                 │
-│  8 numeric settings│  fs 370.37 Hz | Novice 241 s / Trained 236 s | ...    │
-│  [Re-detect]       ├───────────────────────────────────────────────────────┤
-│                    │  [ Trunk rotation ] [ Monopodal stance (knee > 60°) ] │
-│ EVENTS             ├───────────────────────────────────────────────────────┤
-│  id  what  window  │  warnings and errors for the current windows           │
-│  ▸ trunk-01 …      ├───────────────────────────────────────────────────────┤
+│ SESSION            │  Tai Chi event editor                                 │
+│  [saved ▾] [Load]  │  fs 370.37 Hz | Novice 241 s / Trained 236 s | ...    │
+│  [name___] [Save]  ├───────────────────────────────────────────────────────┤
+│  [New session]     │                                                       │
+│ DETECTOR — <tab>   │  [ Trunk rotation ] [ Monopodal stance (knee>60deg) ] │
+│  settings for the  ├───────────────────────────────────────────────────────┤
+│  stabilization     │                                                       │
+│  [Re-detect <fam>] │                                                       │
+│ EVENTS             │  warnings and errors for the current windows          │
+│  id  what  window  ├───────────────────────────────────────────────────────┤
+│  ▸ trunk-01 …      │                                                       │
 │    trunk-02 …      │  NOVICE                                               │
 │  [Toggle] [Delete] │   1  trunk-pelvis yaw        ▓▓▓▓▓▓    ░░░░           │
 │                    │   2  yaw speed envelope      ▓▓▓▓▓▓    ░░░░           │
-│ BOUNDARIES (s)     │   3  lumbar + chest ang.vel. ▓▓▓▓▓▓    ░░░░           │
-│  Novice   Trained  │   4  knee flexion            ▓▓▓▓▓▓    ░░░░           │
-│  ev start ev start │  TRAINED                                              │
-│  ev end   ev end   │   (same four plots, independent time axis)            │
-│  stab st  stab st  ├───────────────────────────────────────────────────────┤
-│  stab end stab end │  Recalculated metrics (table)                         │
-│                    │  Regenerated figures                                  │
+│ ADD AN EVENT       │   3  lumbar + chest ang.vel. ▓▓▓▓▓▓    ░░░░           │
+│  [trial▾] [leg▾]   │   4  knee flexion            ▓▓▓▓▓▓    ░░░░           │
+│  [+ Add event here]│  TRAINED                                              │
+│                    │   (same four plots, independent time axis)            │
+│ DELETED EVENTS     ├───────────────────────────────────────────────────────┤
+│  [select ▾]        │  Recalculated metrics (table)                         │
+│  [Restore selected]│  Regenerated figures                                  │
+│                    │                                                       │
+│ BOUNDARIES (s)     │                                                       │
+│  Novice   Trained  │                                                       │
+│  ev start ev start │                                                       │
+│  ev end   ev end   │                                                       │
+│  stab st  stab st  │                                                       │
+│  stab end stab end │                                                       │
 │ [Recalculate]      │                                                       │
 └────────────────────┴───────────────────────────────────────────────────────┘
 ```
 
-**Two tabs**, labelled `Trunk rotation` and `Monopodal stance (knee > 60 deg)`. Trunk-rotation events exist in both recordings as a matched pair — one event, two windows. Monopodal-stance events belong to a single recording, so when one is selected the other participant's boundary boxes grey out. That is expected.
+**Two tabs**, labelled `Trunk rotation` and `Monopodal stance (knee > 60 deg)`. Events in both families are **paired**: one event holds a window in each recording, so selecting it shows the same movement in the novice and the trained participant side by side, and every metric is reported for both.
+
+Monopodal-stance events are paired **within each leg**, in time order — the k-th left-knee event in one recording corresponds to the k-th in the other. Pairing within a leg rather than across all events guarantees a pair always compares like with like, which matters because the stance leg drives the asymmetry metrics.
+
+Where one recording has more events of a leg than the other, the surplus becomes a **single-sided** event: it keeps a window for the recording it was found in, and the other participant's boundary boxes grey out. That is expected, and such an event contributes only to the trial it has a window for.
 
 **Two graphs.** Novice on top, Trained below. They pan and zoom **independently**, because the two recordings are not time-aligned — the same movement can happen at different clock times in each.
 
@@ -56,11 +71,11 @@ The software places both windows automatically, and gets most of them approximat
 
 ## 3. Reading the four plots
 
-All four rows share one time axis, so a vertical line through them is the same instant. From top to bottom:
+All four rows share one time axis
 
 ### Row 1 — trunk-pelvis yaw (deg)
 
-Rotation of the chest **relative to the pelvis**, about the vertical axis. This is axial trunk twist: positive and negative correspond to turning one way and the other. Because it is a *relative* angle between two sensors, it is unaffected by the yaw drift that limits absolute heading (see §8).
+Rotation of the chest **relative to the pelvis**, about the vertical axis. This is axial trunk twist: positive and negative correspond to turning one way and the other. It is a *relative* angle between two sensors.
 
 This is the signal that defines a trunk-rotation event. A clean event looks like a ramp from one plateau to another, typically 40–70° on these recordings.
 
@@ -78,7 +93,7 @@ The dotted line is the **quiet baseline** — a low percentile of this signal ac
 
 ### Row 4 — knee flexion |x| (deg)
 
-Absolute flexion angle of the left and right knee, with a dashed line at **60°**. Crossings of that line define monopodal-stance events. On the trunk-rotation tab this row is context: it tells you whether a trunk rotation coincided with a deep weight shift onto one leg.
+Absolute flexion angle of the left and right knee, with a dashed line at the **monopodal threshold** (60° by default). Crossings of that line define monopodal-stance events, and the line moves if you change the threshold on the *Monopodal stance* detector panel. On the trunk-rotation tab this row is context: it tells you whether a trunk rotation coincided with a deep weight shift onto one leg.
 
 ---
 
@@ -107,10 +122,70 @@ If you enter a start later than its end, the editor swaps them rather than creat
 - **Toggle on/off** — excludes an event from recalculation without deleting it. Use this when an
   event is spurious but you want a record that you saw it. Disabled events show the flag `off` and
   are drawn faintly.
-- **Delete** — removes it from the session.
+- **Delete** — moves the event to the *Deleted events* list. It is not lost; see below.
 
 All changes save immediately to `outputs/event_editor_session.json`. There is no separate save step,
 and your work survives restarting the app.
+
+### Adding an event the detector missed
+
+Automatic detection keeps only the highest-scoring events, so a genuine movement can be left out —
+particularly a gentle one, or one close in time to a larger movement.
+
+1. **Zoom to where the event belongs.** The new event is placed at the centre of the currently
+   visible time range, so frame the movement before adding it.
+2. On the *Monopodal stance* tab, choose which **knee flexes**, and whether the event is created in
+   `Both` recordings (the default, giving a paired event) or in just one — use a single recording
+   when a movement genuinely appears in only one of them. On the *Trunk rotation* tab these
+   dropdowns are disabled, because a trunk event is always created in both.
+3. Press **+ Add event here**.
+
+You get a default window — 3 s for a trunk rotation, 2 s for a monopodal stance, with a
+stabilization window of the current *stabilization length* immediately after — which you then drag
+to fit, exactly as for a detected event. A manually added event is marked `edited` from the start,
+since none of its boundaries came from the detector.
+
+The two windows of a paired event are placed independently, each at the centre of its own graph's
+view. That is deliberate: the recordings are not time-aligned, so a single shared time would put one
+of them in the wrong place. **Frame the movement in both graphs before adding**, or you will have to
+drag one of the two windows a long way.
+
+### Saving and loading sessions
+
+Your editing is written continuously to the **working session**, so nothing is lost to a crash or a
+restart. A *named* session is a copy of it kept alongside, which lets you hold several curations of
+the same recordings — a conservative segmentation and a permissive one, say — and move between them
+instead of overwriting one with the other.
+
+- **Save** — type a name and press it. The name is tidied into a filename (`tight windows` becomes
+  `tight-windows`), the copy is written to `outputs/sessions/`, and that name becomes the one you
+  are editing. Saving again under the same name overwrites that copy.
+- **Load** — pick from the dropdown. The session replaces everything on screen: events, deleted
+  events and detector settings.
+- **New session from detection** — throws the current curation away and re-detects both families
+  from scratch, using the settings currently in the detector panels. The deleted-events list is
+  emptied and the session becomes unnamed again. Use it to start over, or to see what the detector
+  makes of a new set of thresholds without a half-edited session in the way.
+
+*New* differs from *Re-detect* in scope: Re-detect replaces one family and leaves the other and the
+deleted list alone, whereas New resets everything.
+
+**Loading and New both park what they replaced in `_previous`.** Load that to undo, including when
+you deliberately reload the session you are already on to throw away unsaved edits. Only one step of
+undo is kept, so the next load overwrites it.
+
+Named sessions live in `outputs/sessions/` as readable JSON and are tracked by git, so a curation can
+be committed as the provenance for whatever numbers you publish from it.
+
+### Restoring a deleted event
+
+Deleting moves an event to the **Deleted events** list rather than discarding it. Pick it from the
+dropdown — entries are labelled with the event id, recording, leg and original time span — and press
+**Restore selected**. It returns to the list in chronological order with its boundaries intact.
+
+The list persists in the session file, so a deletion can still be undone after restarting the app.
+An event keeps its original id on restore unless that id has since been reused, in which case it is
+issued a new one.
 
 ---
 
@@ -120,7 +195,15 @@ These re-run automatic detection. **"Re-detect trunk events" replaces all trunk 
 
 The most useful thing about these controls is not the numbers themselves — it is that row 2 and row 3 draw the thresholds the detector actually used, so you can see *why* a boundary landed where it did.
 
-### Movement boundaries
+The panel follows the tab. On *Trunk rotation* you see the trunk settings and a **Re-detect trunk
+events** button; on *Monopodal stance* you see the knee settings and **Re-detect stance events**.
+Either button re-detects only its own family, so the other family's curated windows are never
+replaced by a click meant for this one. The stabilization settings sit below both, because the
+settling window is found the same way whichever movement precedes it.
+
+Switching tabs does not reset anything — each panel keeps its values while hidden.
+
+### Trunk rotation — movement boundaries
 
 | setting | default | sensible range | what it does |
 | --- | --- | --- | --- |
@@ -132,7 +215,15 @@ The most useful thing about these controls is not the numbers themselves — it 
 
 The two thresholds interact: the effective bar is `max(onset threshold × peak speed, velocity floor)`, so whichever is higher wins. That is why lowering the floor below ~25 changes nothing — the relative threshold is already binding.
 
-### Stabilization window
+### Monopodal stance — movement boundaries
+
+| setting | default | sensible range | what it does |
+| --- | --- | --- | --- |
+| **knee flexion threshold** (deg) | 60 | 45 – 90 | How deeply the knee must flex for the stance to count as monopodal. This is the *definition* of the event, so changing it changes what is being measured, not just how well it is found. The dashed line on row 4 moves with it. Raised to 90° on these recordings, only the deepest stances survive. |
+| **min event duration** (s) | 0.4 | 0.3 – 1.0 | Rejects brief dips past the threshold. |
+| **merge gap** (s) | 0.2 | 0.1 – 0.5 | A momentary rise back above the threshold lasting less than this does not split one stance into two. Raise it if a single stance is being reported as two events. |
+
+### Stabilization window (applies to both families)
 
 | setting | default | sensible range | what it does |
 | --- | --- | --- | --- |
@@ -152,7 +243,7 @@ The two thresholds interact: the effective bar is `max(onset threshold × peak s
 | `unsettled` | the stabilization window is more than 1.6× the recording's quiet baseline — **look at this one** |
 | `off` | disabled, excluded from recalculation |
 
-`unsettled` is the flag worth acting on. It means the software could not find a genuinely quiet window after the movement. Sometimes moving the green band fixes it. Sometimes it does not, because the person genuinely never settled — which on these recordings happens, especially for the novice, and is a finding rather than a fault. Either way, decide deliberately rather than accept the default.
+`unsettled` is the flag worth acting on. It means the script could not find a genuinely quiet window after the movement. Sometimes moving the green band fixes it. Sometimes it does not, because the person genuinely never settled — which on these recordings happens, especially for the novice, and is a finding rather than a fault, or the sequences follow to close to each other. Either way, decide deliberately rather than accept the default.
 
 ### Messages above the plots
 
@@ -166,6 +257,7 @@ The two thresholds interact: the effective bar is `max(onset threshold × peak s
 | *event is N s; the coordination lag searches ±2 s and may saturate* | Usually fine — the lag is computed on a padded window (§7) — but check the lag value in the results. |
 | *stabilization overlaps the event* | Legal and sometimes correct: if the movement ends the moment the person stops turning, recovery can begin immediately. Confirm on row 3. |
 | *stabilization is N× the quiet baseline* | The `unsettled` case above. |
+| *novice and trained windows are N s apart, against a typical M s* | Probably a mispairing. Pairing is by order, so one missing or spurious event shifts every later pair. Check the two windows really are the same movement; add the missing event or delete the spurious one to bring the rest back into step. |
 
 ---
 
@@ -197,7 +289,7 @@ Metrics fall into two groups by which window they use.
 | `lumbar_ap_acc_variance_g2` | **Anteroposterior** (fore-aft) sway. | Lower = steadier. |
 | `lumbar_orientation_variability_deg` | How much the lower trunk's orientation varies while settling. | Lower = more stable posture. |
 | `corrective_peak_rate_hz` | Rate of corrective bursts per second — how often the trunk makes a sharp adjustment, measured against a threshold set from the whole recording. | Lower = fewer corrections needed. |
-| `lumbar_rms_angular_velocity_dps` | Overall rotational "busyness" while settling. Needs no threshold, so it is the simplest of this group. | Lower = quieter. |
+| `lumbar_rms_angular_velocity_dps` | Overall rotational "busyness" while settling. Needs no threshold. | Lower = quieter. |
 
 `monopodal_stance_asymmetry_metrics.csv` gives the absolute left-versus-right difference per
 participant. Larger = more asymmetric between stance legs.
@@ -214,7 +306,7 @@ Because you are placing windows by hand, each metric was tested by jittering eve
 | `lumbar_ap_acc_variance_g2` | 0.96 | dependable |
 | `corrective_lumbar_angular_velocity_peak_count` | 0.41 | **do not use** — superseded by the rate above; kept only so older results reproduce |
 
-**Coordination lag has a failure mode with a specific signature.** The cross-correlation searches ±2 s. If it reports **±1.998 s**, it did not find a peak — it ran out of search range. That is a failure marker, not a measurement, and the log flags it. The lag is computed on a deliberately widened window to avoid this, but if you make a movement window very short you may still see it. Discard those values rather than interpreting them.
+**Coordination lag has a failure mode with a specific signature.** The cross-correlation searches ±2 s. If it reports **±1.998 s**, it did not find a peak — it ran out of search range. That is a failure marker, not a measurement, and the log flags it. The lag is computed on a deliberately widened window to avoid this, but if you make a movement window very short you may still see it. Consider discarding those values rather than interpreting them.
 
 ### What you can and cannot conclude
 
@@ -235,8 +327,8 @@ The movement detector works on yaw *speed* rather than yaw angle, which sidestep
 differentiating removes a slowly accumulating offset.
 
 **Novice and trained events are paired by order**, on the assumption that both perform the same form
-in the same sequence. The software does not verify this. If event 3 in one recording is clearly not
-the same movement as event 3 in the other, fix it by hand — that is exactly what the editor is for.
+in the same sequence. The script does not verify this. If event 3 in one recording is clearly not
+the same movement as event 3 in the other, fix it by hand in the editor.
 
 **Long yaw excursions inside a green band are real.** If row 1 ramps 20° during a stabilization
 window, the person is genuinely still turning; that is not drift. Whole-recording drift here is about
@@ -264,17 +356,6 @@ a signal to adjust the **onset threshold** and re-detect rather than to correct 
 hand.
 
 ---
-
-## 10. If something looks wrong
-
-| symptom | likely cause |
-| --- | --- |
-| Plots are blank | A figure was built from numpy arrays instead of lists — see the note in [README.md](README.md). |
-| Zoom resets while editing | Should not happen; the view is preserved deliberately. Report it. |
-| A boundary snaps back after you drag it | It was clamped for being invalid — check the red error message. |
-| Recalculation refuses to run | There is an error (not a warning) somewhere in the list; the message names the event. |
-| Your edits vanished | Check whether **Re-detect trunk events** was pressed; it replaces all trunk events. |
-| Figures below the table look stale | They are regenerated on each recalculation; reload the page if the browser cached them. |
 
 The session file `outputs/event_editor_session.json` is plain, readable JSON holding every boundary
 in sample indices and seconds, with a note of whether each was set automatically or by hand. If the
