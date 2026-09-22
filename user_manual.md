@@ -29,8 +29,9 @@ The software places both windows automatically, and gets most of them approximat
 │  [saved ▾] [Load]  │  fs 370.37 Hz | Novice 241 s / Trained 236 s | ...    │
 │  [name___] [Save]  ├───────────────────────────────────────────────────────┤
 │  [New session]     │                                                       │
-│ DETECTOR — <tab>   │  [ Trunk rotation ] [ Monopodal stance (knee>60deg) ] │
-│  settings for the  ├───────────────────────────────────────────────────────┤
+│ DETECTOR — <tab>   │  [ Trunk rotation ] [ Monopodal stance ]              │
+│  settings for the  │  [ General smoothness ]                               │
+│  open tab, plus    ├───────────────────────────────────────────────────────┤
 │  stabilization     │                                                       │
 │  [Re-detect <fam>] │                                                       │
 │ EVENTS             │  warnings and errors for the current windows          │
@@ -41,8 +42,9 @@ The software places both windows automatically, and gets most of them approximat
 │                    │   2  yaw speed envelope      ▓▓▓▓▓▓    ░░░░           │
 │ ADD AN EVENT       │   3  lumbar + chest ang.vel. ▓▓▓▓▓▓    ░░░░           │
 │  [trial▾] [leg▾]   │   4  knee flexion            ▓▓▓▓▓▓    ░░░░           │
-│  [+ Add event here]│  TRAINED                                              │
-│                    │   (same four plots, independent time axis)            │
+│  [+ Add event here]│   5  chest + pelvis yaw      ▓▓▓▓▓▓    ░░░░           │
+│                    │  TRAINED                                              │
+│                    │   (same five plots, independent time axis)            │
 │ DELETED EVENTS     ├───────────────────────────────────────────────────────┤
 │  [select ▾]        │  Recalculated metrics (table)                         │
 │  [Restore selected]│  Regenerated figures                                  │
@@ -57,7 +59,9 @@ The software places both windows automatically, and gets most of them approximat
 └────────────────────┴───────────────────────────────────────────────────────┘
 ```
 
-**Two tabs**, labelled `Trunk rotation` and `Monopodal stance (knee > 60 deg)`. Events in both families are **paired**: one event holds a window in each recording, so selecting it shows the same movement in the novice and the trained participant side by side, and every metric is reported for both.
+**Three tabs**, labelled `Trunk rotation`, `Monopodal stance (knee > 60 deg)` and `General smoothness`. Events in all three families are **paired**: one event holds a window in each recording, so selecting it shows the same movement in the novice and the trained participant side by side, and every metric is reported for both.
+
+The first two tabs hold **events** — moments picked out of the recording, each followed by a settling period. The third holds **segments**, which are different in kind: they tile the moving passages of the form end to end rather than being picked out of it, and they have no stabilization window, so the green band and its two boundary boxes grey out on that tab. See [§10](#10-general-smoothness-segmenting-the-whole-sequence).
 
 Monopodal-stance events are paired **within each leg**, in time order — the k-th left-knee event in one recording corresponds to the k-th in the other. Pairing within a leg rather than across all events guarantees a pair always compares like with like, which matters because the stance leg drives the asymmetry metrics.
 
@@ -69,9 +73,9 @@ Where one recording has more events of a leg than the other, the surplus becomes
 
 ---
 
-## 3. Reading the four plots
+## 3. Reading the five plots
 
-All four rows share one time axis
+All five rows share one time axis
 
 ### Row 1 — trunk-pelvis yaw (deg)
 
@@ -94,6 +98,14 @@ The dotted line is the **quiet baseline** — a low percentile of this signal ac
 ### Row 4 — knee flexion |x| (deg)
 
 Absolute flexion angle of the left and right knee, with a dashed line at the **monopodal threshold** (60° by default). Crossings of that line define monopodal-stance events, and the line moves if you change the threshold on the *Monopodal stance* detector panel. On the trunk-rotation tab this row is context: it tells you whether a trunk rotation coincided with a deep weight shift onto one leg.
+
+### Row 5 — chest and pelvis yaw (deg)
+
+Absolute rotation of the chest and of the pelvis about the vertical, each relative to its own drifting baseline. Row 1 shows the *difference* between these two; this row shows them separately, so you can see whether a twist came from the chest turning, the pelvis staying, or both.
+
+**This is the row that defines a sequence segment.** The dotted line at zero is where the chest passes through neutral, and the two dashed lines are the **minimum turn** a swing must reach to count (±10° by default). A segment boundary is placed where the chest crosses zero between two opposing turns that both reach those lines.
+
+Read the two traces together on the other tabs as well: where they run parallel the trunk is turning as a unit, and where the pale pelvis trace flattens while the chest keeps going, the person is twisting rather than turning.
 
 ---
 
@@ -223,7 +235,20 @@ The two thresholds interact: the effective bar is `max(onset threshold × peak s
 | **min event duration** (s) | 0.4 | 0.3 – 1.0 | Rejects brief dips past the threshold. |
 | **merge gap** (s) | 0.2 | 0.1 – 0.5 | A momentary rise back above the threshold lasting less than this does not split one stance into two. Raise it if a single stance is being reported as two events. |
 
-### Stabilization window (applies to both families)
+### General smoothness — segment boundaries
+
+| setting | default | sensible range | what it does |
+| --- | --- | --- | --- |
+| **segment unit** | Full cycle | — | `Full back-and-forth cycle` gives one segment per complete oscillation — chest turns one way, back through neutral, then the other way. `Half cycle` gives one per single-direction excursion. On these recordings: 13 full cycles per participant at ~11 s each, or 27–28 half cycles at ~5.7 s. Full cycles match how the form is built; half cycles give you twice as many samples for the variability statistics, at the cost of each one being half a movement. Conclusions that only hold for one unit are worth distrusting. |
+| **min turn from neutral** (deg) | 10 | 5 – 20 | How far the chest must swing for a turn to count. This is the setting that decides how many segments you get, because the real turns reach 40–70° and everything below this is the chest hovering near neutral. At 5° the still passages start producing segments; at 20° only the largest turns survive. |
+| **min turn separation** (s) | 1.5 | 1.0 – 3.0 | Minimum spacing between successive turns, as for the trunk detector. |
+| **min segment excursion** (deg) | 10 | 10 – 30 | Rejects a finished segment whose total yaw range is too small to score. Segments below ~10° give erratic SPARC values. |
+| **min segment duration** (s) | 2.0 | 1.0 – 3.0 | Rejects blips. |
+| **max segment duration** (s) | 20 | 15 – 25 | **The setting that keeps the pauses out.** Both recordings stand still for roughly the first 18 s, the last 35 s, and a ~40 s passage in the middle. Without this cap the turns on either side of a pause are joined into one 30 s "cycle" that is mostly not moving. With it, those spans are simply not segmented, which is why the bands on row 5 cover about 60 % of the recording rather than all of it. |
+
+### Stabilization window (applies to trunk and stance events)
+
+Sequence segments have no stabilization window, so this panel is hidden on the *General smoothness* tab.
 
 | setting | default | sensible range | what it does |
 | --- | --- | --- | --- |
@@ -347,13 +372,101 @@ window, the person is genuinely still turning; that is not drift. Whole-recordin
 5. Deal with every `unsettled` flag deliberately — fix it, or accept it as a real finding.
 6. Repeat on the **Monopodal stance** tab. There, judge the amber band against row 4 and the 60°
    line.
-7. Press **Recalculate metrics**.
-8. Read the log. Discard any lag reported at ±1.998 s.
-9. Check the regenerated figures below the table — the bands drawn there should match what you set.
+7. On the **General smoothness** tab, judge the bands against row 5: each should span one full
+   oscillation of the chest yaw, with its edges on the dotted zero line. Here prefer re-detecting at
+   a different **min turn from neutral** over correcting many boundaries by hand, and check that the
+   two recordings produced the same number of segments (§10).
+8. Press **Recalculate metrics**. The table shows the family whose tab is open; every family is
+   recalculated regardless.
+9. Read the log. Discard any lag reported at ±1.998 s.
+10. Check the regenerated figures below the table — the bands drawn there should match what you set.
 
 If the detector is systematically placing windows too wide or too narrow across many events, that is
 a signal to adjust the **onset threshold** and re-detect rather than to correct twelve windows by
 hand.
+
+---
+
+## 10. General smoothness: segmenting the whole sequence
+
+### What this tab is for
+
+The other two tabs measure balance at a handful of moments. Six trunk rotations and four stances out
+of a four-minute form leaves most of the recording unmeasured, so nothing in the analysis describes
+how the form *as a whole* is performed — whether it flows, and whether it is performed the same way
+from one part to the next. That second question is the movement-variability question.
+
+The form is carried by large chest yaw rotations, so the chest passing through neutral is a natural
+place to cut. Each part is then scored for smoothness and for chest–pelvis coordination, and the
+**spread of those scores across parts** is the variability measure.
+
+### What a segment is
+
+A segment runs from one neutral crossing of the chest yaw to another. With the default *Full cycle*
+unit that is a complete back-and-forth — the chest turns one way, returns through neutral, turns the
+other way — which is the ~11 s unit the form is built from on these recordings.
+
+Boundaries are placed by finding the **turns** first and the crossings between them second, rather
+than by looking for crossings directly. A turn reaching 40–70° is unambiguous; the signal near zero
+is not, and debouncing crossings by size silently welds the neighbours of any rejected wobble into
+one very long lobe. Finding the peaks first avoids that.
+
+Segments **abut** — one ends where the next begins — unlike the other two families, whose events are
+picked out of the recording with gaps between them. Genuine gaps do appear where the form pauses and
+no segment is produced; the editor warns only if two segments *overlap* by more than 0.5 s, which
+normally means a boundary was dragged past its neighbour.
+
+### Working on this tab
+
+It works like the others: select a segment, judge it against **row 5**, drag the amber band or type
+into the two event boxes. The stabilization boxes and the green band are greyed out, because there is
+nothing to settle from.
+
+The thing to check is that each band spans one full oscillation and that its edges sit where the
+chest yaw crosses the dotted zero line. Changing the **segment unit** or the **min turn from neutral**
+and pressing *Re-detect segments* is usually faster than correcting many boundaries by hand.
+
+Because a segment is defined by the signal rather than chosen, the detector finds the same number of
+parts in both recordings when both perform the same form — 13 and 13 here — which makes the
+order-based pairing more trustworthy than it is for the other families. A count that differs between
+the two participants is itself worth looking at before you correct it.
+
+### What each metric means
+
+Per segment, in `outputs/sequence_smoothness_metrics.csv`:
+
+| metric | plain meaning | direction |
+| --- | --- | --- |
+| `chest_yaw_log10_dimensionless_jerk` | Smoothness of the turn in the time domain, on the same definition and log scale as `weight_shift_log10_dimensionless_jerk`. | **Lower = smoother.** |
+| `chest_yaw_sparc` | Smoothness from the shape of the speed spectrum (spectral arc length). Needs no amplitude or duration normalisation, so it does not inherit their sensitivity to where you put the edges. | Negative; **less negative = smoother**. |
+| `chest_yaw_submovement_rate_hz` | How many separate speed peaks per second the turn is made of. One continuous turn has one peak; a hesitant or two-stage turn has more. The most directly checkable of the three against row 5. | Lower = fewer interruptions. |
+| `chest_pelvis_lag_s` | How far the chest's rotation trails the pelvis's. | Near zero = they turn together. |
+| `chest_pelvis_peak_cross_correlation` | How alike the two rotations are at that lag (0–1). | Near 1 = same shape; a low value means the lag is not meaningful. |
+| `chest_pelvis_gain` | Pelvis yaw range ÷ chest yaw range. | 1 = the trunk turns as a unit; below 1 the chest turns on a comparatively still pelvis. ~0.57 here. |
+| `relative_yaw_range_deg`, `relative_yaw_rms_deg` | How much axial twist opens up inside the segment. | Larger = more dissociation between chest and pelvis. |
+
+Across segments, in `outputs/sequence_variability_summary.csv` — **this is the variability answer**:
+
+| metric | plain meaning |
+| --- | --- |
+| `duration_cv`, `chest_yaw_excursion_cv` | How consistent the parts are in length and size. |
+| `*_sd` (jerk, SPARC, submovement rate, lag) | How consistent the *quality* of the movement is from part to part, as opposed to how good it is on average. |
+| `waveform_mean_sd_deg` | Every segment time-normalised to 0–100 %, sign-aligned and centred; this is the mean spread of the resulting corridor, in degrees. |
+| `waveform_variance_ratio` | The same idea, dimensionless (the Kadaba ratio): within-cycle variance about the mean waveform over total variance. **Lower = more repeatable**, and it compares across participants where the SD in degrees does not. |
+
+The corridor is drawn in `outputs/sequence_smoothness_figure.png` alongside the segmented signal.
+
+### A caution on the two smoothness measures
+
+Jerk and SPARC do not have to agree, and on these recordings they do not: the trained participant
+scores slightly smoother on jerk and slightly *less* smooth on SPARC. That is not a bug in either.
+They measure different things — jerk is dominated by the sharpest moment in the window, SPARC by how
+much spectral content the movement has overall. Where they disagree, report both and say so, or fall
+back on the submovement rate, which you can check by eye against row 5.
+
+Remember the standing caution from §7: one novice and one trained participant is descriptive. The
+within-person spread across 13 segments is a reasonable description of that person's consistency; the
+difference between the two people is not a training effect.
 
 ---
 

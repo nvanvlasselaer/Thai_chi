@@ -33,7 +33,11 @@ NOVICE_CSV = DATA_DIR / "IMU_Trial_1_RC_Novice.csv"
 TRAINED_CSV = DATA_DIR / "IMU_Trial_3_RC_Trained.csv"
 FS = 370.3704
 
-Ignore_high_pass_filter = False  # Set to True to skip the high-pass filter (for yaw drift)
+# Default False: the 0.05 Hz high-pass is applied, so yaw is de-drifted.  Set to
+# True to make highpass_detrend a pass-through.  This changes every yaw-derived
+# number in all three families, so it is recorded into the session file on every
+# save and shown in the editor header.
+Ignore_high_pass_filter = False
 
 # Which trunk-event detector main() uses.  "v2" derives each event's duration
 # and boundaries from the trunk yaw velocity (see analysis/event_detection.py);

@@ -56,6 +56,7 @@ ROW_TITLES = [
     "yaw speed envelope (deg/s)  -  dotted: onset/offset floor",
     "lumbar + chest angular velocity (deg/s)  -  dotted: quiet baseline",
     "knee flexion |x| (deg)  -  dashed: monopodal threshold",
+    "chest and pelvis yaw (deg)  -  dashed: minimum turn for a sequence segment",
 ]
 N_ROWS = len(ROW_TITLES)
 RECOMPUTE_LOCK = threading.Lock()
@@ -86,9 +87,12 @@ def build_display(loaded: edt.LoadedTrial) -> dict:
 
     trunk_diag = ed.trunk_yaw_envelope(kin, fs)
     stab_diag = ed.combined_omega(kin, fs)
+    segment_diag = ed.chest_yaw_signals(kin, fs)
 
     return {
         "time": _series(time_s),
+        "chest_yaw": _series(resample(segment_diag.chest_yaw_deg)),
+        "pelvis_yaw": _series(resample(segment_diag.pelvis_yaw_deg)),
         "yaw": _series(resample(trunk_diag.yaw_deg)),
         "envelope": _series(resample(trunk_diag.envelope_dps)),
         "envelope_floor": float(trunk_diag.floor_dps),
@@ -131,9 +135,11 @@ def base_figure(label: str, display: dict) -> go.Figure:
     add(display["combined_omega"], "lumbar + chest w", 3, "#264653", width=1.3)
     add(display["left_knee"], "left knee", 4, "#d1495b", width=1.1)
     add(display["right_knee"], "right knee", 4, "#f4a261", width=1.1)
+    add(display["chest_yaw"], "chest yaw", 5, "#1f77b4", width=1.3)
+    add(display["pelvis_yaw"], "pelvis yaw", 5, "#8ecae6", width=1.0)
 
     figure.update_layout(
-        height=760,
+        height=920,
         margin={"l": 60, "r": 20, "t": 40, "b": 40},
         dragmode="pan",
         hovermode="x unified",
@@ -194,17 +200,20 @@ def _threshold_line(y: float, row: int, colour: str, dash: str) -> dict:
     }
 
 
-def threshold_lines(display: dict, knee_threshold: float) -> list[dict]:
+def threshold_lines(display: dict, knee_threshold: float, min_lobe_deg: float) -> list[dict]:
     """The thresholds the detectors used, so a boundary stays explainable."""
     return [
         _threshold_line(display["envelope_floor"], 2, "#7b4173", "dot"),
         _threshold_line(display["omega_baseline"], 3, "#264653", "dot"),
         _threshold_line(knee_threshold, 4, "#444444", "dash"),
+        _threshold_line(0.0, 5, "#888888", "dot"),
+        _threshold_line(min_lobe_deg, 5, "#444444", "dash"),
+        _threshold_line(-min_lobe_deg, 5, "#444444", "dash"),
     ]
 
 
 def build_shapes(session: dict, selection: dict, label: str, fs: float,
-                 display: dict, knee_threshold: float) -> list[dict]:
+                 display: dict, knee_threshold: float, min_lobe_deg: float) -> list[dict]:
     """Two editable rects for the selected event, then references and context."""
     selected = find_event(session, selection)
     shapes: list[dict] = []
@@ -212,15 +221,20 @@ def build_shapes(session: dict, selection: dict, label: str, fs: float,
     window = window_for(selected, label) if selected else None
     if window is not None:
         shapes.append(_rect(window["event_start"] / fs, window["event_end"] / fs, EVENT_COLOUR, True, 0.22))
-        shapes.append(_rect(window["stab_start"] / fs, window["stab_end"] / fs, STAB_COLOUR, True, 0.20))
     else:
         # Keep indices 0 and 1 occupied so a stale relayout cannot address a
         # context rect. Placed off-screen rather than omitted.
         shapes.append(_rect(-1, -1, EVENT_COLOUR, False, 0.0))
+    # Sequence segments have no stabilization band, so index 1 is held by an
+    # off-screen rect for them -- the fixed index contract decode_relayout
+    # depends on holds whatever family is open.
+    if window is not None and "stab_start" in window:
+        shapes.append(_rect(window["stab_start"] / fs, window["stab_end"] / fs, STAB_COLOUR, True, 0.20))
+    else:
         shapes.append(_rect(-1, -1, STAB_COLOUR, False, 0.0))
 
     # Appended after the editable pair so their indices 0 and 1 stay fixed.
-    shapes += threshold_lines(display, knee_threshold)
+    shapes += threshold_lines(display, knee_threshold, min_lobe_deg)
 
     selected_id = selection.get("event_id")
     for event in all_events(session, selection.get("family", "trunk")):
@@ -239,7 +253,7 @@ def build_shapes(session: dict, selection: dict, label: str, fs: float,
 
 
 def all_events(session: dict, family: str) -> list[dict]:
-    return session.get("trunk_events" if family == "trunk" else "knee_events", [])
+    return session.get(edt.FAMILY_KEY.get(family, "trunk_events"), [])
 
 
 def find_event(session: dict, selection: dict) -> dict | None:
@@ -268,6 +282,8 @@ def set_boundaries(event: dict, label: str, band: str, start: int, end: int) -> 
     if window is None:
         return False
     start_key, end_key = ("event_start", "event_end") if band == "event" else ("stab_start", "stab_end")
+    if start_key not in window:
+        return False  # this family has no such band -- sequence segments have no stabilization
     if window[start_key] == start and window[end_key] == end:
         return False
     window[start_key], window[end_key] = start, end
@@ -298,42 +314,44 @@ def decode_relayout(relayout: dict | None) -> dict[str, tuple[float, float]]:
     return result
 
 
-def event_table_rows(session: dict, family: str, trials: dict[str, edt.LoadedTrial]) -> list[dict]:
-    rows = []
-    for event in all_events(session, family):
-        if family == "trunk":
-            novice = event["windows"]["Novice"]
-            trained = event["windows"]["Trained"]
-            fs_n = trials["Novice"].fs
-            fs_t = trials["Trained"].fs
-            rows.append({
-                "event_id": event["event_id"],
-                "detail": "trunk rotation",
-                "novice": f"{novice['event_start']/fs_n:.1f}-{novice['event_end']/fs_n:.1f}",
-                "trained": f"{trained['event_start']/fs_t:.1f}-{trained['event_end']/fs_t:.1f}",
-                "dur": f"{(novice['event_end']-novice['event_start'])/fs_n:.1f}s",
-                "flags": event_flags(event),
-            })
-        else:
-            def span(label: str) -> str:
-                window = event["windows"].get(label)
-                if window is None:
-                    return "--"
-                fs = trials[label].fs
-                return f"{window['event_start']/fs:.1f}-{window['event_end']/fs:.1f}"
+EVENT_DETAIL = {
+    "trunk": lambda event: "trunk rotation",
+    "knee": lambda event: f"{event['flexed_leg'][:1]}-knee flexed",
+    "smooth": lambda event: "sequence part",
+}
 
-            present = [l for l in trials if l in event["windows"]]
-            ref = event["windows"].get(present[0]) if present else None
-            dur = (f"{(ref['event_end']-ref['event_start'])/trials[present[0]].fs:.1f}s"
-                   if ref else "--")
-            rows.append({
-                "event_id": event["event_id"],
-                "detail": f"{event['flexed_leg'][:1]}-knee flexed",
-                "novice": span("Novice"),
-                "trained": span("Trained"),
-                "dur": dur,
-                "flags": event_flags(event),
-            })
+
+def event_table_rows(session: dict, family: str, trials: dict[str, edt.LoadedTrial]) -> list[dict]:
+    """One row per event, for whichever family the open tab shows.
+
+    Every family may now be single-sided -- a stance found in one recording
+    only, or a part of the form the detector found in one of them -- so the span
+    of each trial is read defensively rather than indexed.
+    """
+    rows = []
+    detail_of = EVENT_DETAIL.get(family, lambda event: family)
+    for event in all_events(session, family):
+        windows = event.get("windows", {})
+
+        def span(label: str) -> str:
+            window = windows.get(label)
+            if window is None:
+                return "--"
+            fs = trials[label].fs
+            return f"{window['event_start']/fs:.1f}-{window['event_end']/fs:.1f}"
+
+        present = [label for label in trials if label in windows]
+        ref = windows.get(present[0]) if present else None
+        dur = (f"{(ref['event_end']-ref['event_start'])/trials[present[0]].fs:.1f}s"
+               if ref else "--")
+        rows.append({
+            "event_id": event["event_id"],
+            "detail": detail_of(event),
+            "novice": span("Novice"),
+            "trained": span("Trained"),
+            "dur": dur,
+            "flags": event_flags(event),
+        })
     return rows
 
 
@@ -384,6 +402,7 @@ def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
     stab_defaults = ed.StabilizationParams()
 
     knee_defaults = ed.KneeDetectorParams()
+    segment_defaults = ed.SegmentDetectorParams()
 
     row_style = {"display": "flex", "gap": "4px", "marginTop": "3px"}
 
@@ -425,9 +444,24 @@ def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
             detector_input("p-knee-dur", "min event duration (s)", knee_defaults.min_duration_s, 0.1),
             detector_input("p-knee-gap", "merge gap (s)", knee_defaults.merge_gap_s, 0.05),
         ]),
+        html.Div(id="smooth-params", children=[
+            html.Label("segment unit", style={"fontSize": "11px", "color": "#555"}),
+            dcc.Dropdown(
+                id="p-smooth-unit",
+                options=[{"label": "Full back-and-forth cycle", "value": "full"},
+                         {"label": "Half cycle (one excursion)", "value": "half"}],
+                value="half" if segment_defaults.half_cycles else "full",
+                clearable=False, style={"fontSize": "11px", "marginBottom": "4px"},
+            ),
+            detector_input("p-smooth-lobe", "min turn from neutral (deg)", segment_defaults.min_lobe_deg, 1),
+            detector_input("p-smooth-sep", "min turn separation (s)", segment_defaults.min_lobe_separation_s, 0.1),
+            detector_input("p-smooth-exc", "min segment excursion (deg)", segment_defaults.min_excursion_deg, 1),
+            detector_input("p-smooth-min-dur", "min segment duration (s)", segment_defaults.min_duration_s, 0.5),
+            detector_input("p-smooth-max-dur", "max segment duration (s)", segment_defaults.max_duration_s, 1),
+        ]),
 
-        html.Div([
-            html.Div("Stabilization — applies to both families",
+        html.Div(id="stab-params", children=[
+            html.Div("Stabilization — applies to trunk and stance events",
                      style={"fontSize": "10px", "color": "#888", "borderTop": "1px solid #eee",
                             "paddingTop": "6px", "marginTop": "6px"}),
             detector_input("p-lambda", "latency penalty", stab_defaults.latency_weight, 0.05),
@@ -529,6 +563,7 @@ def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
         dcc.Tabs(id="family-tabs", value="trunk", children=[
             dcc.Tab(label="Trunk rotation", value="trunk"),
             dcc.Tab(label="Monopodal stance (knee > 60 deg)", value="knee"),
+            dcc.Tab(label="General smoothness", value="smooth"),
         ]),
 
         html.Div(id="validation", style={"fontSize": "11px", "padding": "6px 12px"}),
@@ -613,9 +648,20 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             raise PreventUpdate
         return candidate
 
+    DETECTOR_PANEL = {
+        "trunk": ("Detector — trunk rotation", "Re-detect trunk events",
+                  "Replaces all trunk-rotation events and discards their edits."),
+        "knee": ("Detector — monopodal stance", "Re-detect stance events",
+                 "Replaces all monopodal-stance events and discards their edits."),
+        "smooth": ("Detector — sequence segments", "Re-detect segments",
+                   "Replaces all sequence segments and discards their edits."),
+    }
+
     @app.callback(
         Output("trunk-params", "style"),
         Output("knee-params", "style"),
+        Output("smooth-params", "style"),
+        Output("stab-params", "style"),
         Output("detector-title", "children"),
         Output("btn-redetect", "children"),
         Output("redetect-hint", "children"),
@@ -623,11 +669,12 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
     )
     def switch_detector_panel(family):
         shown, hidden = {"display": "block"}, {"display": "none"}
-        if family == "trunk":
-            return (shown, hidden, "Detector — trunk rotation", "Re-detect trunk events",
-                    "Replaces all trunk-rotation events and discards their edits.")
-        return (hidden, shown, "Detector — monopodal stance", "Re-detect stance events",
-                "Replaces all monopodal-stance events and discards their edits.")
+        # The panels all stay in the DOM so their States are always resolvable;
+        # only which one is visible changes.  Sequence segments have no
+        # stabilization window, so that block hides with them.
+        styles = [shown if family == key else hidden for key in ("trunk", "knee", "smooth")]
+        styles.append(hidden if family == "smooth" else shown)
+        return (*styles, *DETECTOR_PANEL.get(family, DETECTOR_PANEL["trunk"]))
 
     # The visible time range per graph, so a new event can be placed where the
     # user is looking.  make_subplots links the rows to the bottom axis, so zoom
@@ -702,6 +749,9 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         State("p-n-events", "value"), State("p-lambda", "value"),
         State("p-horizon", "value"), State("p-stab-dur", "value"),
         State("p-knee-thr", "value"), State("p-knee-dur", "value"), State("p-knee-gap", "value"),
+        State("p-smooth-unit", "value"), State("p-smooth-lobe", "value"),
+        State("p-smooth-sep", "value"), State("p-smooth-exc", "value"),
+        State("p-smooth-min-dur", "value"), State("p-smooth-max-dur", "value"),
         State("store-view", "data"),
         State("add-trial", "value"), State("add-leg", "value"),
         State("trash-select", "value"),
@@ -714,6 +764,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
          selection, session,
          rel_thr, floor_pct, min_dur, min_exc, n_events, lam, horizon, stab_dur,
          knee_thr, knee_dur, knee_gap,
+         smooth_unit, smooth_lobe, smooth_sep, smooth_exc, smooth_min_dur, smooth_max_dur,
          view, add_trial, add_leg, trash_index, session_name, session_choice) = rest
 
         trigger = ctx.triggered_id
@@ -725,7 +776,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         clear_name = no_update
 
         def current_detector_params():
-            """The settings shown in the panels, which both detectors act on."""
+            """The settings shown in the panels, which every detector acts on."""
             return (
                 ed.TrunkDetectorParams(
                     n_events=int(n_events or 6),
@@ -744,6 +795,14 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                     min_duration_s=float(knee_dur or 0.4),
                     merge_gap_s=float(knee_gap or 0.2),
                 ),
+                ed.SegmentDetectorParams(
+                    half_cycles=(smooth_unit == "half"),
+                    min_lobe_deg=float(smooth_lobe or 10.0),
+                    min_lobe_separation_s=float(smooth_sep or 1.5),
+                    min_excursion_deg=float(smooth_exc or 10.0),
+                    min_duration_s=float(smooth_min_dur or 2.0),
+                    max_duration_s=float(smooth_max_dur or 20.0),
+                ),
             )
 
         if trigger == "btn-new-session":
@@ -752,8 +811,9 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             family = selection.get("family", "trunk")
             selection = {"family": family, "event_id": _first_id(session, family)}
             message = (
-                f"New session: {len(session['trunk_events'])} trunk and "
-                f"{len(session['knee_events'])} monopodal-stance events detected at the current "
+                f"New session: {len(session['trunk_events'])} trunk, "
+                f"{len(session['knee_events'])} monopodal-stance and "
+                f"{len(session['smooth_events'])} sequence segments detected at the current "
                 f"settings. The session it replaced is in '{edt.PREVIOUS_SLOT}' — load that to undo."
             )
 
@@ -782,7 +842,8 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                     selection = {"family": family, "event_id": _first_id(session, family)}
                     loaded_name = session.get("session_name", session_choice)
                     counts = (f"{len(session.get('trunk_events', []))} trunk, "
-                              f"{len(session.get('knee_events', []))} monopodal-stance events")
+                              f"{len(session.get('knee_events', []))} monopodal-stance, "
+                              f"{len(session.get('smooth_events', []))} sequence segments")
                     message = (
                         f"Loaded '{loaded_name}': {counts}. "
                         + (f"'{edt.PREVIOUS_SLOT}' now holds what this replaced, so loading it "
@@ -792,28 +853,29 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                     )
 
         if trigger == "btn-redetect":
-            trunk_params, stab_params, knee_params = current_detector_params()
-            # Re-detect only the family whose tab is open, so the other family's
+            trunk_params, stab_params, knee_params, segment_params = current_detector_params()
+            # Re-detect only the family whose tab is open, so the other families'
             # curated windows are never replaced by a click meant for this one.
             if family == "trunk":
                 session["trunk_events"] = edt.seed_session(
-                    trials, trunk_params, stab_params, knee_params
+                    trials, trunk_params, stab_params, knee_params, segment_params
                 )["trunk_events"]
-                spans = [
-                    (e["windows"]["Novice"]["event_end"] - e["windows"]["Novice"]["event_start"]) / fs_of["Novice"]
-                    for e in session["trunk_events"]
-                ]
                 noun = "trunk-rotation"
-            else:
+            elif family == "knee":
                 session["knee_events"] = edt.seed_knee_events(trials, stab_params, knee_params)
-                spans = [
-                    (w["event_end"] - w["event_start"]) / fs_of[label]
-                    for e in session["knee_events"] for label, w in e["windows"].items()
-                ]
                 noun = "monopodal-stance"
+            else:
+                session["smooth_events"] = edt.seed_smooth_events(trials, segment_params)
+                noun = "sequence-segment"
+            spans = [
+                (w["event_end"] - w["event_start"]) / fs_of[label]
+                for e in all_events(session, family) for label, w in e["windows"].items()
+            ]
 
-            session["detector"] = ed.params_to_dict(trunk_params, stab_params, knee_params)
-            count = len(session["trunk_events" if family == "trunk" else "knee_events"])
+            session["detector"] = ed.params_to_dict(
+                trunk_params, stab_params, knee_params, segment_params
+            )
+            count = len(all_events(session, family))
             message = (
                 f"Detected {count} {noun} events, windows "
                 f"{min(spans):.1f}-{max(spans):.1f} s (mean {np.mean(spans):.1f} s)."
@@ -824,31 +886,35 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
 
         if trigger == "btn-add":
             stab_len = float(stab_dur or 3.0)
+            centres = {label: view_centre(view, label) for label in edt.TRIALS}
             if family == "trunk":
-                new = edt.add_trunk_event(
-                    session, trials,
-                    {label: view_centre(view, label) for label in edt.TRIALS},
-                    stab_len_s=stab_len,
-                )
-                where = ", ".join(f"{label} {view_centre(view, label):.1f}s" for label in edt.TRIALS)
-            else:
+                new = edt.add_trunk_event(session, trials, centres, stab_len_s=stab_len)
+            elif family == "knee":
                 new = edt.add_knee_event(
                     session, trials, add_trial or "Both", add_leg or "Left",
-                    {label: view_centre(view, label) for label in edt.TRIALS},
-                    stab_len_s=stab_len,
+                    centres, stab_len_s=stab_len,
                 )
-                where = ", ".join(f"{l} {view_centre(view, l):.1f}s" for l in sorted(new["windows"]))
+            else:
+                new = edt.add_smooth_event(session, trials, add_trial or "Both", centres)
+            where = ", ".join(f"{label} {centres[label]:.1f}s" for label in sorted(new["windows"]))
             session_out = session
             selection = {**selection, "event_id": new["event_id"]}
             message = f"Added {new['event_id']} at {where}. Drag its edges to fit the movement."
 
         elif trigger == "btn-restore":
-            restored = edt.restore_event(session, trash_index, trials) if trash_index is not None else None
+            entry = (edt.trash_of(session)[trash_index]
+                     if trash_index is not None and 0 <= trash_index < len(edt.trash_of(session))
+                     else None)
+            # Read the family from the trash entry: every family now stores its
+            # windows the same way, so the shape of the event cannot say which
+            # one it came from.
+            restored_family = entry.get("family") if entry else None
+            restored = edt.restore_event(session, trash_index, trials) if entry else None
             if restored is None:
                 message = "Select a deleted event to restore."
             else:
                 session_out = session
-                family = "trunk" if "windows" in restored else "knee"
+                family = restored_family or family
                 selection = {"family": family, "event_id": restored["event_id"]}
                 message = f"Restored {restored['event_id']}."
 
@@ -903,14 +969,17 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             edt.save_session(edt.refresh_seconds(session, trials))
 
         # --- render -------------------------------------------------------
-        knee_threshold = float(
-            (session.get("detector") or {}).get("knee_threshold_deg", edt.KNEE_THRESHOLD_DEG)
+        detector = session.get("detector") or {}
+        knee_threshold = float(detector.get("knee_threshold_deg", edt.KNEE_THRESHOLD_DEG))
+        min_lobe_deg = float(
+            detector.get("smooth_min_lobe_deg", ed.SegmentDetectorParams().min_lobe_deg)
         )
         patches = []
         for label in edt.TRIALS:
             patch = Patch()
             patch["layout"]["shapes"] = build_shapes(
-                session, selection, label, fs_of[label], displays[label], knee_threshold
+                session, selection, label, fs_of[label], displays[label],
+                knee_threshold, min_lobe_deg,
             )
             patches.append(patch)
 
@@ -924,20 +993,26 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         ]
         trash_value = None if trigger == "btn-restore" else no_update
 
-        is_trunk = selection.get("family", "trunk") == "trunk"
+        open_family = selection.get("family", "trunk")
+        # A trunk event always exists in both recordings, so its trial dropdown
+        # is fixed; the leg dropdown only means anything for a stance.
+        lock_trial = open_family == "trunk"
+        lock_leg = open_family != "knee"
         add_hint = (
-            "A trunk event is created in both recordings at once."
-            if is_trunk else "Both = a paired event; pick one recording for a single-sided one."
+            "A trunk event is created in both recordings at once." if lock_trial
+            else "Both = a paired event; pick one recording for a single-sided one."
         )
 
         out_values, out_disabled = [], []
         for _cid, label, band, slot in BOUNDARY_INPUTS:
             window = window_for(event, label)
-            if window is None:
+            keys = ("event_start", "event_end") if band == "event" else ("stab_start", "stab_end")
+            # A family with no stabilization band greys out its two boxes rather
+            # than showing boundaries that do not exist.
+            if window is None or keys[slot] not in window:
                 out_values.append(None)
                 out_disabled.append(True)
                 continue
-            keys = ("event_start", "event_end") if band == "event" else ("stab_start", "stab_end")
             out_values.append(round(window[keys[slot]] / fs_of[label], 2))
             out_disabled.append(False)
 
@@ -949,7 +1024,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         session_options = [{"label": n, "value": n} for n in edt.list_sessions()]
 
         return (session_out, *patches, rows, banner, title, message,
-                trash_options, trash_value, add_hint, is_trunk, is_trunk,
+                trash_options, trash_value, add_hint, lock_trial, lock_leg,
                 session_options, current_label, clear_name,
                 *out_values, *out_disabled)
 
@@ -962,16 +1037,24 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         Input("btn-recalc", "n_clicks"),
         State("store-session", "data"),
         State("store-figrev", "data"),
+        State("family-tabs", "value"),
         prevent_initial_call=True,
     )
-    def recalculate(_clicks, session, figrev):
+    def recalculate(_clicks, session, figrev, family):
         try:
             with RECOMPUTE_LOCK:
                 result = edt.recompute(session, trials, write=True)
         except Exception as error:  # surfaced in the UI instead of killing the callback
             return no_update, no_update, no_update, no_update, f"Recalculation failed:\n{error}"
 
-        table = result.trunk_metrics.round(4)
+        # Every family is recalculated, but the table shows the one whose tab is
+        # open -- the numbers you were just curating windows for.
+        frames = {
+            "trunk": result.trunk_metrics,
+            "knee": result.knee_metrics,
+            "smooth": result.smooth_metrics,
+        }
+        table = frames.get(family, result.trunk_metrics).round(4)
         columns = [{"name": c, "id": c} for c in table.columns]
         figrev = (figrev or 0) + 1
         gallery = [
@@ -980,17 +1063,20 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                 "trunk_traceability_figure.png",
                 "monopodal_stance_traceability_figure.png",
                 "monopodal_stance_overview_figure.png",
+                "sequence_smoothness_figure.png",
             )
         ]
         message = "Wrote:\n  " + "\n  ".join(result.written) + "\n\n" + "\n".join(result.log)
         return table.to_dict("records"), columns, gallery, figrev, message
 
     @app.callback(Output("header-meta", "children"), Input("store-session", "data"))
-    def header(session):
+    def header(_session):
         parts = [
             f"fs {trials['Novice'].fs:.2f} Hz",
             f"Novice {trials['Novice'].duration_s:.0f} s / Trained {trials['Trained'].duration_s:.0f} s",
-            f"high-pass {'disabled' if session.get('ignore_high_pass_filter') else 'enabled'}",
+            # Read the live module flag, not the stored one: the header must
+            # describe the code about to run, not the code that seeded the file.
+            f"high-pass {'disabled' if pipeline.Ignore_high_pass_filter else 'enabled'}",
             f"session {edt.SESSION_PATH.name}",
         ]
         return " | ".join(parts)
@@ -1001,8 +1087,11 @@ def describe_event(event: dict | None, selection: dict) -> str:
         return "No event selected."
     present = sorted(event.get("windows", {}))
     where = " + ".join(present) if len(present) > 1 else (present[0] if present else "no recording")
-    if selection.get("family") == "trunk":
+    family = selection.get("family", "trunk")
+    if family == "trunk":
         return f"{event['event_id']} - trunk rotation  [{where}]"
+    if family == "smooth":
+        return f"{event['event_id']} - sequence part  [{where}]"
     return (f"{event['event_id']} - {event['flexed_leg']} knee flexed "
             f"({event['stance_leg']} leg stance)  [{where}]")
 
@@ -1050,12 +1139,14 @@ def main() -> None:
             session = edt.seed_session(trials)
         edt.save_session(edt.refresh_seconds(session, trials))
     else:
-        session, notes = edt.migrate_session(session)
+        session, notes = edt.migrate_session(session, trials)
         for note in notes:
             print(f"  migrated: {note}")
         if notes:
             edt.save_session(edt.refresh_seconds(session, trials))
-    print(f"  {len(session['trunk_events'])} trunk events, {len(session['knee_events'])} monopodal-stance events")
+    print(f"  {len(session['trunk_events'])} trunk events, "
+          f"{len(session['knee_events'])} monopodal-stance events, "
+          f"{len(session.get('smooth_events', []))} sequence segments")
 
     app = build_app(trials, session)
     print(f"\nEditor running at http://127.0.0.1:{args.port}\n")
