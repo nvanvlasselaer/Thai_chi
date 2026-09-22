@@ -2,14 +2,18 @@
 
 Kinematic comparison of a novice and a trained Tai Chi practitioner from full-body inertial
 measurement unit (IMU) recordings. The analysis estimates segment orientations, derives trunk and
-lower-limb joint angles, segments two families of balance-relevant events, and computes balance and
-movement-variability metrics on those events.
+lower-limb joint angles, segments three families of balance-relevant windows, and computes balance
+and movement-variability metrics on them.
 
-Two events are analysed:
+Three families are analysed:
 
 - **Trunk rotation / weight shift** — axial rotation of the trunk relative to the pelvis, and the
   postural settling that follows it.
 - **Monopodal stance** — single-leg support, identified by unilateral knee flexion above 60°.
+- **Sequence segments** — the moving passages of the whole form, cut at the neutral crossings of the
+  chest yaw into one back-and-forth turn each, and scored for smoothness, chest–pelvis coordination
+  and consistency from one part to the next. Unlike the first two these are not picked out of the
+  recording but tile it, and they have no stabilization window.
 
 ---
 
@@ -77,7 +81,7 @@ Behaviour is controlled by module-level constants at the top of the script:
 | constant | default | meaning |
 | --- | --- | --- |
 | `DETECTOR` | `"v2"` | event-segmentation method — see [Event detection](#event-detection) |
-| `Ignore_high_pass_filter` | `True` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled |
+| `Ignore_high_pass_filter` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
 | `FS` | `370.3704` | nominal sampling rate (the parser also reads it from the file header) |
 
 ### Interactive event editor
@@ -190,6 +194,26 @@ Written to `outputs/trunk_rotation_balance_metrics.csv` and
 | `lumbar_rms_angular_velocity_dps` | stabilization | RMS lumbar angular velocity |
 | `peak_knee_flexion_deg`, `time_to_stabilization_s` | event | monopodal stance only |
 
+### Sequence smoothness
+
+Written per segment to `outputs/sequence_smoothness_metrics.csv`, and summarised per participant to
+`outputs/sequence_variability_summary.csv`. The summary file is the movement-variability result: it
+reports the spread of each per-segment metric across the parts of the form.
+
+| metric | meaning |
+| --- | --- |
+| `chest_yaw_log10_dimensionless_jerk` | smoothness of the turn, same definition as the weight-shift jerk above; lower is smoother |
+| `chest_yaw_sparc` | spectral arc length of the yaw speed profile (Balasubramanian et al. 2015); negative, less negative is smoother |
+| `chest_yaw_submovement_rate_hz` | separate speed peaks per second — one continuous turn has one peak, a hesitant one has several |
+| `chest_pelvis_lag_s`, `chest_pelvis_peak_cross_correlation` | chest–pelvis coordination and its time offset, over the segment |
+| `chest_pelvis_gain` | pelvis yaw range ÷ chest yaw range; 1 = the trunk turns as a unit |
+| `relative_yaw_range_deg`, `relative_yaw_rms_deg` | how much axial twist opens up inside the segment |
+| `duration_cv`, `chest_yaw_excursion_cv`, `*_sd` | *(summary)* consistency of the parts in length, size and movement quality |
+| `waveform_mean_sd_deg`, `waveform_variance_ratio` | *(summary)* spread of the time-normalised, sign-aligned corridor; the variance ratio is the dimensionless Kadaba form, lower being more repeatable |
+
+Jerk and SPARC measure different aspects of smoothness and need not agree — on these recordings they
+point in opposite directions. Report both rather than picking the flattering one.
+
 `monopodal_stance_asymmetry_metrics.csv` reports absolute left-versus-right differences per
 participant, averaged over events.
 
@@ -272,6 +296,7 @@ analysis/
   event_detection.py          velocity-based event segmentation and stabilization search
   editor_data.py              loading, session state, recalculation (no UI dependencies)
   event_editor.py             interactive boundary editor (Dash)
+  sequence_smoothness.py      smoothness, coordination and consistency metrics per sequence segment
   plot_kinematics.py          joint-angle plots from the 50 Hz CSVs
   plot_IMU.py                 raw accelerometer/gyroscope dashboard
   animate_kinematics.py       3D stick-figure animation
@@ -295,6 +320,9 @@ Literature.md, BibLaTeX.txt   references
 - **Two participants, one trial each.** Differences between the novice and trained recordings are
   descriptive. No statistical inference about training effects is supported by this sample.
 - **Novice/trained event pairing is by order** and should be verified visually.
+- **Sequence segments cover the moving passages only**, about 60 % of each recording. The still
+  spans at the start, middle and end of the form produce no segment, by design — a "cycle" spanning
+  a pause would be mostly not moving.
 - **Segment lengths are nominal.** No anthropometric scaling or functional joint-axis calibration is
   applied, so joint angles carry soft-tissue and mounting error.
 - `Implementation_strategy.md` describes a largest-Lyapunov-exponent analysis that is planned but not

@@ -71,6 +71,37 @@ class KneeDetectorParams:
 
 
 @dataclass
+class SegmentDetectorParams:
+    """Tunable parameters for :func:`detect_yaw_cycle_segments`.
+
+    The Tai Chi form is carried by large chest yaw rotations: the chest turns
+    one way, back through neutral, then the other way.  Cutting the recording at
+    those neutral crossings gives comparable parts of the sequence without
+    hand-picking events, which is what the smoothness family is scored over.
+    """
+
+    half_cycles: bool = False
+    """``False`` = one segment per full back-and-forth, ``True`` = one per
+    single-direction excursion."""
+    yaw_cutoff_hz: float = 0.5
+    """Smoothing applied before the turns are located.  Low, because only the
+    carrier oscillation defines a segment, not the detail riding on it."""
+    min_lobe_deg: float = 10.0
+    """How far the chest must turn from neutral for a swing to count as one.
+    The real turns here reach 40-70 deg, so this mainly rejects the chest
+    hovering near neutral during the still passages of the form."""
+    min_lobe_separation_s: float = 1.5
+    """Minimum spacing between successive turns, as for the trunk detector."""
+    min_excursion_deg: float = 10.0
+    min_duration_s: float = 2.0
+    max_duration_s: float = 20.0
+    """Segments longer than this span a pause rather than a movement.  Both
+    recordings stand still for ~18 s at the start, ~35 s at the end and ~40 s in
+    the middle; without this cap the turns either side of a pause are joined
+    into one 30 s "cycle" that is mostly not moving."""
+
+
+@dataclass
 class StabilizationParams:
     """Tunable parameters for :func:`find_stabilization`.
 
@@ -138,6 +169,16 @@ class StabilizationDiagnostics:
 
     combined_omega_dps: np.ndarray
     baseline_dps: float
+
+
+@dataclass
+class SegmentDiagnostics:
+    """Signals the segment detector thresholded on, for plotting."""
+
+    chest_yaw_deg: np.ndarray
+    pelvis_yaw_deg: np.ndarray
+    smoothed_yaw_deg: np.ndarray
+    min_lobe_deg: float
 
 
 def trunk_yaw_envelope(
@@ -230,6 +271,113 @@ def detect_trunk_rotation_events(
 
     selected.sort(key=lambda event: event.start)
     return selected, diagnostics
+
+
+def chest_yaw_signals(
+    kin: Kinematics, fs: float, params: SegmentDetectorParams | None = None
+) -> SegmentDiagnostics:
+    """Return the chest and pelvis yaw traces the segment detector works on.
+
+    Both are high-pass detrended the same way every other yaw channel in the
+    pipeline is, because a 6-axis solution has no absolute heading reference.
+    The smoothed copy is what the turns are located on: only the carrier
+    oscillation defines a segment, not the detail riding on it.  The metrics are
+    computed on the unsmoothed traces.
+    """
+    params = params or SegmentDetectorParams()
+
+    chest = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
+    pelvis = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
+
+    return SegmentDiagnostics(
+        chest_yaw_deg=chest,
+        pelvis_yaw_deg=pelvis,
+        smoothed_yaw_deg=lowpass_signal(chest, fs, cutoff_hz=params.yaw_cutoff_hz),
+        min_lobe_deg=float(params.min_lobe_deg),
+    )
+
+
+def _turning_points(
+    signal: np.ndarray, fs: float, params: SegmentDetectorParams
+) -> list[tuple[int, int]]:
+    """Alternating extrema of the yaw oscillation, as ``(index, direction)``.
+
+    Keying on the extrema rather than on the neutral crossings is what makes the
+    segmentation stable: a turn reaching 40-70 deg is unambiguous, whereas the
+    crossings themselves are whatever the signal does while it is near zero, and
+    debouncing them by amplitude silently welds the neighbours of any rejected
+    wobble into one long lobe.
+    """
+    distance = max(1, int(params.min_lobe_separation_s * fs))
+    positive, _ = find_peaks(signal, height=params.min_lobe_deg, distance=distance)
+    negative, _ = find_peaks(-signal, height=params.min_lobe_deg, distance=distance)
+
+    extrema = sorted(
+        [(int(i), 1) for i in positive] + [(int(i), -1) for i in negative]
+    )
+
+    # A single turn can show two humps; keep only its largest, so that the list
+    # strictly alternates in direction and every adjacent pair brackets one
+    # neutral crossing.
+    alternating: list[tuple[int, int]] = []
+    for index, direction in extrema:
+        if alternating and alternating[-1][1] == direction:
+            if abs(signal[index]) > abs(signal[alternating[-1][0]]):
+                alternating[-1] = (index, direction)
+        else:
+            alternating.append((index, direction))
+    return alternating
+
+
+def _neutral_between(signal: np.ndarray, first: int, second: int) -> int:
+    """Where the yaw passes neutral between two opposing turns."""
+    span = signal[first:second + 1]
+    crossings = np.where(np.diff(np.sign(span)) != 0)[0]
+    if len(crossings):
+        return first + int(crossings[0]) + 1
+    # No sign change: the oscillation never quite reached neutral.  The closest
+    # approach is the boundary, which keeps the detector working whatever the
+    # high-pass leaves behind.
+    return first + int(np.argmin(np.abs(span)))
+
+
+def detect_yaw_cycle_segments(
+    kin: Kinematics, fs: float, params: SegmentDetectorParams | None = None
+) -> tuple[list[tuple[int, int]], SegmentDiagnostics]:
+    """Cut the recording into parts at the neutral crossings of the chest yaw.
+
+    Boundaries are placed where the yaw passes neutral between two opposing
+    turns, so the interval between consecutive boundaries is exactly one
+    single-direction excursion: a full back-and-forth spans two of them, a half
+    cycle one.  Segments too short, too small or too long to be one part of the
+    form are dropped rather than reported with numbers that do not mean
+    anything -- in particular the duration cap is what stops the turns either
+    side of a pause in the form being joined into one very long "cycle".
+    """
+    params = params or SegmentDetectorParams()
+    diagnostics = chest_yaw_signals(kin, fs, params)
+    smoothed = diagnostics.smoothed_yaw_deg
+
+    turns = _turning_points(smoothed, fs, params)
+    boundaries = [
+        _neutral_between(smoothed, first, second)
+        for (first, _), (second, _) in zip(turns[:-1], turns[1:])
+    ]
+
+    step = 1 if params.half_cycles else 2
+    spans = [
+        (boundaries[i], boundaries[i + step])
+        for i in range(0, len(boundaries) - step, step)
+    ]
+
+    chest = diagnostics.chest_yaw_deg
+    segments = [
+        (start, end)
+        for start, end in spans
+        if params.min_duration_s <= (end - start) / fs <= params.max_duration_s
+        and float(np.ptp(chest[start:end])) >= params.min_excursion_deg
+    ]
+    return segments, diagnostics
 
 
 def combined_omega(
@@ -470,6 +618,7 @@ def pair_trunk_events(
 PARAM_CLASSES = {
     "trunk": TrunkDetectorParams,
     "knee": KneeDetectorParams,
+    "smooth": SegmentDetectorParams,
     "stab": StabilizationParams,
 }
 
@@ -478,10 +627,12 @@ def params_to_dict(
     trunk: TrunkDetectorParams,
     stabilization: StabilizationParams,
     knee: KneeDetectorParams | None = None,
+    segment: SegmentDetectorParams | None = None,
 ) -> dict[str, float]:
     """Flatten the parameter sets for storage in the session file."""
     merged: dict[str, float] = {}
     for prefix, params in (("trunk", trunk), ("knee", knee or KneeDetectorParams()),
+                           ("smooth", segment or SegmentDetectorParams()),
                            ("stab", stabilization)):
         merged.update({f"{prefix}_{k}": v for k, v in asdict(params).items()})
     return merged
@@ -489,7 +640,7 @@ def params_to_dict(
 
 def params_from_dict(
     values: dict[str, float]
-) -> tuple[TrunkDetectorParams, StabilizationParams, KneeDetectorParams]:
+) -> tuple[TrunkDetectorParams, StabilizationParams, KneeDetectorParams, SegmentDetectorParams]:
     """Rebuild the parameter sets from a flattened dict, ignoring unknown keys."""
     built = {}
     for prefix, cls in PARAM_CLASSES.items():
@@ -500,4 +651,4 @@ def params_from_dict(
             if key.startswith(f"{prefix}_")
         }
         built[prefix] = cls(**{k: v for k, v in supplied.items() if k in fields})
-    return built["trunk"], built["stab"], built["knee"]
+    return built["trunk"], built["stab"], built["knee"], built["smooth"]
