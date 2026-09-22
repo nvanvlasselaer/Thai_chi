@@ -55,8 +55,28 @@ class TrunkDetectorParams:
 
 
 @dataclass
+class KneeDetectorParams:
+    """Tunable parameters for monopodal-stance detection.
+
+    Mirrors the arguments of ``find_knee_flexion_windows`` so the thresholds
+    that define a single-leg stance can be adjusted from the interface rather
+    than being fixed in code.
+    """
+
+    threshold_deg: float = 60.0
+    """Knee flexion magnitude above which the stance counts as monopodal."""
+    min_duration_s: float = 0.4
+    merge_gap_s: float = 0.2
+    """Sub-threshold dips shorter than this do not split one event into two."""
+
+
+@dataclass
 class StabilizationParams:
-    """Tunable parameters for :func:`find_stabilization`."""
+    """Tunable parameters for :func:`find_stabilization`.
+
+    Shared by both event families: the settling window is found the same way
+    whether it follows a trunk rotation or a single-leg stance.
+    """
 
     min_duration_s: float = 3.0
     """Stabilization window length.  The pipeline used 2 s; measured against
@@ -447,24 +467,37 @@ def pair_trunk_events(
     return windows, novice_events[:paired], trained_events[:paired]
 
 
+PARAM_CLASSES = {
+    "trunk": TrunkDetectorParams,
+    "knee": KneeDetectorParams,
+    "stab": StabilizationParams,
+}
+
+
 def params_to_dict(
-    trunk: TrunkDetectorParams, stabilization: StabilizationParams
+    trunk: TrunkDetectorParams,
+    stabilization: StabilizationParams,
+    knee: KneeDetectorParams | None = None,
 ) -> dict[str, float]:
-    """Flatten both parameter sets for storage in the session file."""
-    merged = {f"trunk_{k}": v for k, v in asdict(trunk).items()}
-    merged.update({f"stab_{k}": v for k, v in asdict(stabilization).items()})
+    """Flatten the parameter sets for storage in the session file."""
+    merged: dict[str, float] = {}
+    for prefix, params in (("trunk", trunk), ("knee", knee or KneeDetectorParams()),
+                           ("stab", stabilization)):
+        merged.update({f"{prefix}_{k}": v for k, v in asdict(params).items()})
     return merged
 
 
 def params_from_dict(
     values: dict[str, float]
-) -> tuple[TrunkDetectorParams, StabilizationParams]:
-    """Rebuild both parameter sets from a flattened dict, ignoring unknown keys."""
-    trunk_fields = {f.name for f in TrunkDetectorParams.__dataclass_fields__.values()}
-    stab_fields = {f.name for f in StabilizationParams.__dataclass_fields__.values()}
-    trunk = {k[len("trunk_") :]: v for k, v in values.items() if k.startswith("trunk_")}
-    stab = {k[len("stab_") :]: v for k, v in values.items() if k.startswith("stab_")}
-    return (
-        TrunkDetectorParams(**{k: v for k, v in trunk.items() if k in trunk_fields}),
-        StabilizationParams(**{k: v for k, v in stab.items() if k in stab_fields}),
-    )
+) -> tuple[TrunkDetectorParams, StabilizationParams, KneeDetectorParams]:
+    """Rebuild the parameter sets from a flattened dict, ignoring unknown keys."""
+    built = {}
+    for prefix, cls in PARAM_CLASSES.items():
+        fields = set(cls.__dataclass_fields__)
+        supplied = {
+            key[len(prefix) + 1:]: value
+            for key, value in values.items()
+            if key.startswith(f"{prefix}_")
+        }
+        built[prefix] = cls(**{k: v for k, v in supplied.items() if k in fields})
+    return built["trunk"], built["stab"], built["knee"]
