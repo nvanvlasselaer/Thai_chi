@@ -33,7 +33,7 @@ on every channel; ~240 s per recording. Sensor order differs between the two fil
 matches by name rather than position.
 
 **Sensors (14).** Sternum (`chestbone`) and lower back (`lumbar`); left/right thigh, tibia and foot;
-left/right humerus, ulna and hand. Placement is documented in [notes.txt](notes.txt).
+left/right humerus, ulna and hand. Placement is documented in [docs/notes.txt](docs/notes.txt).
 
 **Important limitation.** The sensors are 6-axis (accelerometer + gyroscope, **no magnetometer**).
 Rotation about the gravity vector — yaw — is therefore not directly observable and is subject to
@@ -56,12 +56,12 @@ Python 3.13 with:
 | plotly | 6.5.0 |
 | flask | (via dash) |
 
-`ffmpeg` is additionally required by `animate_kinematics.py`.
+`ffmpeg` is additionally required by `analysis/tools/animate_kinematics.py`.
 
 > **Note on dash/plotly.** dash 2.14.2 bundles plotly.js 2.23.2, which cannot decode the base64
 > typed arrays that plotly ≥ 6 emits for numpy input. Any figure code in this repository must
 > convert arrays with `.tolist()` before passing them to a trace, or the plot renders blank with no
-> error. `analysis/event_editor.py` routes everything through a `_series()` helper for this reason.
+> error. `analysis/editor/app.py` routes everything through a `_series()` helper for this reason.
 
 ---
 
@@ -70,24 +70,28 @@ Python 3.13 with:
 ### Full pipeline
 
 ```bash
-python3 analysis/tai_chi_trunk_and_knee.py
+python3 analysis/pipeline.py              # or: python3 -m analysis.pipeline
 ```
 
-Parses both recordings, estimates orientations with a 6-axis Madgwick filter, detects both event
-families, computes all metrics and writes everything under `outputs/`. Takes roughly a minute.
+Parses both recordings, estimates orientations with a 6-axis Madgwick filter, detects the
+trunk-rotation and monopodal-stance events, computes their metrics and writes everything under
+`outputs/`. Takes roughly a minute.
 
-Behaviour is controlled by module-level constants at the top of the script:
+Behaviour is controlled by the switches in `analysis/config.py`, which also holds the data and
+output paths:
 
 | constant | default | meaning |
 | --- | --- | --- |
 | `DETECTOR` | `"v2"` | event-segmentation method — see [Event detection](#event-detection) |
-| `Ignore_high_pass_filter` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
-| `FS` | `370.3704` | nominal sampling rate (the parser also reads it from the file header) |
+| `IGNORE_HIGH_PASS_FILTER` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
+
+The sampling rate is read from each file's header (370.3704 Hz on every channel).
 
 ### Interactive event editor
 
 ```bash
-python3 analysis/event_editor.py          # serves at http://127.0.0.1:8051
+python3 analysis/editor/app.py            # or: python3 -m analysis.editor.app
+                                          # serves at http://127.0.0.1:8051
 ```
 
 Automatic segmentation is a starting point, not an answer — see
@@ -95,12 +99,12 @@ Automatic segmentation is a starting point, not an answer — see
 each event's four boundaries (movement start/end, stabilization start/end) be dragged into place,
 then recalculates every metric through the pipeline's own functions.
 
-**[user_manual.md](user_manual.md)** covers the dashboard in detail: what each plot shows, how to
+**[docs/user_manual.md](docs/user_manual.md)** covers the dashboard in detail: what each plot shows, how to
 adjust the windows, sensible ranges for the detector settings, and how to read the results.
 
 | flag | effect |
 | --- | --- |
-| `--port N` | serve on a different port (default 8051; `plot_IMU.py` uses 8050) |
+| `--port N` | serve on a different port (default 8051; `plot_imu.py` uses 8050) |
 | `--reseed auto` | discard the saved session and re-run the detectors |
 | `--reseed v1` | reseed from the committed window CSVs, reproducing the original automatic result |
 | `--recompute-orientation` | re-run the Madgwick filter instead of reusing `outputs/orientation_*.npz` |
@@ -117,12 +121,16 @@ values remain available through git.
 
 ### Supporting tools
 
+Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all find `data/` and
+`outputs/` through `analysis/config.py`, so they run from any directory.
+
 | command | purpose |
 | --- | --- |
-| `python3 analysis/plot_kinematics.py` | plot the 50 Hz joint-angle series (run from the repository root) |
-| `python3 analysis/plot_IMU.py` | Dash dashboard for browsing raw accelerometer/gyroscope channels |
-| `python3 analysis/animate_kinematics.py [npz] [out.mp4] [--start S --end E --fps N]` | render a 3D stick-figure animation (requires `ffmpeg`) |
-| `python3 analysis/plot_frame.py [npz] [--axis-scale S]` | plot one skeleton frame with local axis triads, to check sensor alignment |
+| `python3 analysis/tools/plot_kinematics.py` | plot the 50 Hz joint-angle series |
+| `python3 analysis/tools/plot_imu.py` | Dash dashboard for browsing raw accelerometer/gyroscope channels |
+| `python3 analysis/tools/animate_kinematics.py [npz] [out.mp4] [--start S --end E --fps N]` | render a 3D stick-figure animation (requires `ffmpeg`) |
+| `python3 analysis/tools/plot_frame.py [npz] [--axis-scale S]` | plot one skeleton frame with local axis triads, to check sensor alignment |
+| `python3 analysis/tools/yt_download.py` | download the video at the URL in the script from YouTube (requires `yt-dlp`) |
 
 ---
 
@@ -187,7 +195,7 @@ Written to `outputs/trunk_rotation_balance_metrics.csv` and
 | --- | --- | --- |
 | `trunk_pelvis_peak_cross_correlation`, `trunk_pelvis_lag_s` | event | trunk–pelvis yaw coordination and its time offset |
 | `trunk_pelvis_pitch_lag_s` | event | same in the sagittal plane (monopodal stance only) |
-| `weight_shift_dimensionless_jerk`, `..._log10_...` | event | movement smoothness; see [notes.txt](notes.txt) for why log₁₀ is the inferential form |
+| `weight_shift_dimensionless_jerk`, `..._log10_...` | event | movement smoothness; see [docs/notes.txt](docs/notes.txt) for why log₁₀ is the inferential form |
 | `lumbar_ap_acc_variance_g2`, `lumbar_ml_acc_variance_g2` | stabilization | anteroposterior / mediolateral postural sway |
 | `lumbar_orientation_variability_deg` | stabilization | pooled SD of lumbar orientation |
 | `corrective_peak_rate_hz` | stabilization | rate of corrective angular-velocity bursts |
@@ -290,25 +298,41 @@ traceability figures. The orientation `.npz`, the 50 Hz kinematic CSVs, `sensor_
 
 ## Repository layout
 
+`analysis/` is a Python package whose modules follow the processing chain, one stage each. Every
+module can be imported from a script or notebook (`from analysis.kinematics import load_trial`);
+the entry points can also be run directly as files.
+
 ```
 analysis/
-  tai_chi_trunk_and_knee.py   full pipeline: parsing, orientation, metrics, figures
-  event_detection.py          velocity-based event segmentation and stabilization search
-  editor_data.py              loading, session state, recalculation (no UI dependencies)
-  event_editor.py             interactive boundary editor (Dash)
-  sequence_smoothness.py      smoothness, coordination and consistency metrics per sequence segment
-  plot_kinematics.py          joint-angle plots from the 50 Hz CSVs
-  plot_IMU.py                 raw accelerometer/gyroscope dashboard
-  animate_kinematics.py       3D stick-figure animation
-  plot_frame.py               single-frame skeleton with axis triads
-data/                         recordings (not in the repository)
-outputs/                      generated results
-Literature_pdf/               supporting literature
-user_manual.md                guide to using the event editor and interpreting its output
-notes.txt                     sensor placement, calibration notes, metric rationale
-Implementation_strategy.md    planned nonlinear (Lyapunov) analysis — not yet implemented
-Literature.md, BibLaTeX.txt   references
+  config.py               paths, recordings and the analysis-wide switches
+  signals.py              filtering, resampling, cross-correlation lag, index/time conversion
+  orientation.py          quaternion algebra, Madgwick filter, sensor-mounting alignment
+  data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
+  kinematics.py           segment and joint angles; fast loading from the orientation cache
+  detection.py            v2 event detection (trunk, stance, segments, stabilization), pairing
+  detection_v1.py         original fixed-window detector and DTW matching (DETECTOR = "v1")
+  smoothness_metrics.py   smoothness, coordination and consistency per sequence segment
+  balance_metrics.py      trunk-rotation and monopodal-stance metrics
+  figures.py              all output figures
+  pipeline.py             batch entry point — runs everything and writes outputs/
+  editor/
+    app.py                interactive boundary editor (Dash) — entry point
+    sessions.py           the session file: seeding, editing, named copies, migration
+    validation.py         window checks that gate recalculation
+    recompute.py          curated windows → metrics, CSVs and figures
+  tools/                  standalone viewers (see Supporting tools)
+data/                     recordings (not in the repository)
+outputs/                  generated results
+docs/
+  user_manual.md          guide to using the event editor and interpreting its output
+  notes.txt               sensor placement, calibration notes, metric rationale
+  Implementation_strategy.md  planned nonlinear (Lyapunov) analysis — not yet implemented
+  IMU sensor placement.pdf, Tai Chi Balance Analysis.{docx,pdf}, Technical Assignment.docx
+  literature/             Literature.md, BibLaTeX.txt and the PDFs in pdf/
 ```
+
+Each module imports only modules listed above it (type annotations aside), so any stage can be
+used without the ones after it.
 
 ---
 
@@ -316,7 +340,7 @@ Literature.md, BibLaTeX.txt   references
 
 - **No magnetometer.** Absolute yaw is unobservable and drifts; only tilt and relative joint angles
   are reliable in that axis. Mitigation options — functional calibration, anatomical alignment, joint
-  constraints — are discussed in [notes.txt](notes.txt).
+  constraints — are discussed in [docs/notes.txt](docs/notes.txt).
 - **Two participants, one trial each.** Differences between the novice and trained recordings are
   descriptive. No statistical inference about training effects is supported by this sample.
 - **Novice/trained event pairing is by order** and should be verified visually.
@@ -325,7 +349,7 @@ Literature.md, BibLaTeX.txt   references
   a pause would be mostly not moving.
 - **Segment lengths are nominal.** No anthropometric scaling or functional joint-axis calibration is
   applied, so joint angles carry soft-tissue and mounting error.
-- `Implementation_strategy.md` describes a largest-Lyapunov-exponent analysis that is planned but not
+- [docs/Implementation_strategy.md](docs/Implementation_strategy.md) describes a largest-Lyapunov-exponent analysis that is planned but not
   implemented in code.
 
 ---

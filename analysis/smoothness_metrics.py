@@ -4,7 +4,7 @@
 The trunk-rotation and monopodal-stance families measure balance on a handful of
 hand-picked events.  Between them the recording is unmeasured, so nothing
 describes how the *form as a whole* is performed.  This module scores the parts
-that :func:`event_detection.detect_yaw_cycle_segments` cuts the recording into —
+that :func:`analysis.detection.detect_yaw_cycle_segments` cuts the recording into —
 one back-and-forth turn of the chest each — on three questions:
 
 * **How smooth is the turn?**  Dimensionless jerk and spectral arc length both
@@ -18,27 +18,24 @@ one back-and-forth turn of the chest each — on three questions:
   segments, plus a waveform corridor built by time-normalising every segment.
 
 The per-segment functions deliberately mirror
-``compute_trunk_rotation_balance_metrics`` in shape, and reuse its primitives
-rather than reimplementing them, so numbers stay comparable across families.
+:func:`analysis.balance_metrics.compute_trunk_rotation_balance_metrics` in
+shape, and share its primitives -- :func:`dimensionless_jerk` here, the
+cross-correlation lag in :mod:`analysis.signals` -- so numbers stay comparable
+across families.
 """
+
 
 from __future__ import annotations
 
 import math
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
-from tai_chi_trunk_and_knee import (
-    Kinematics,
-    OUTPUT_DIR,
-    cross_correlation_lag,
-    dimensionless_jerk,
-    highpass_detrend,
-    lowpass_signal,
-)
+from analysis.kinematics import Kinematics
+from analysis.signals import cross_correlation_lag, highpass_detrend, lowpass_signal
+
 
 WAVEFORM_POINTS = 101
 """Samples per time-normalised segment: 0-100 % of the part, in 1 % steps."""
@@ -47,6 +44,24 @@ WAVEFORM_POINTS = 101
 # ---------------------------------------------------------------------------
 # Smoothness primitives
 # ---------------------------------------------------------------------------
+
+
+def dimensionless_jerk(angle_deg: np.ndarray, fs: float) -> float:
+    """Duration^5 / amplitude^2 times the integrated squared jerk; lower is smoother.
+
+    Spans orders of magnitude, so its log10 is the form used for inference
+    (docs/notes.txt).
+    """
+    angle = np.deg2rad(lowpass_signal(angle_deg, fs, cutoff_hz=6.0, order=4))
+    dt = 1.0 / fs
+    vel = np.gradient(angle, dt)
+    acc = np.gradient(lowpass_signal(vel, fs, cutoff_hz=6.0), dt)
+    jerk = np.gradient(lowpass_signal(acc, fs, cutoff_hz=6.0), dt)
+    duration = len(angle) / fs
+    amplitude = np.ptp(angle)
+    if amplitude < 1e-9:
+        return float("nan")
+    return float((duration**5 / amplitude**2) * np.trapezoid(jerk**2, dx=dt))
 
 
 def spectral_arc_length(
@@ -337,101 +352,3 @@ def summarize_sequence_variability(
             "waveform_variance_ratio": waveform.get("waveform_variance_ratio", float("nan")),
         })
     return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Figure
-# ---------------------------------------------------------------------------
-
-
-TRIAL_COLOURS = {"Novice": "#d1495b", "Trained": "#2a9d8f"}
-
-
-def make_sequence_smoothness_figure(
-    yaw: dict[str, tuple[np.ndarray, np.ndarray]],
-    fs: dict[str, float],
-    metrics: pd.DataFrame,
-    waveforms: dict[str, dict[str, object]],
-) -> None:
-    """Traceability figure: where the segments fell, and how alike they were.
-
-    The left column is the same "show your working" view the other two families
-    get -- the signal the boundaries were taken from, with the bands drawn on
-    it, so a number can always be traced back to a piece of the recording.  The
-    right column is the corridor that the consistency metrics summarise.
-    """
-    trials = [label for label in ("Novice", "Trained") if label in yaw]
-    fig = plt.figure(figsize=(13, 8.5), constrained_layout=True)
-    gs = fig.add_gridspec(len(trials) + 1, 2, width_ratios=[2.0, 1.0],
-                          height_ratios=[1.15] * len(trials) + [1.0])
-
-    for row, label in enumerate(trials):
-        chest_yaw, pelvis_yaw = yaw[label]
-        rate = fs[label]
-        time = np.arange(len(chest_yaw)) / rate
-        rows = metrics[metrics.trial == label]
-
-        ax = fig.add_subplot(gs[row, 0])
-        ax.plot(time, chest_yaw, color="#1f77b4", lw=1.1, label="chest yaw")
-        ax.plot(time, pelvis_yaw, color="#8ecae6", lw=1.0, label="pelvis yaw")
-        ax.axhline(0.0, color="#888888", lw=0.8, ls=":")
-        # Segments abut, so a single shade would read as one long block; the
-        # alternating alpha is what makes the individual parts countable.
-        for i, (_, segment) in enumerate(rows.iterrows()):
-            ax.axvspan(segment["segment_start_s"], segment["segment_end_s"],
-                       color="#f2b134", alpha=0.28 if i % 2 else 0.12,
-                       label="sequence segment" if i == 0 else "")
-        ax.set_ylabel(f"{label}\nyaw (deg)")
-        ax.grid(True, color="#dddddd", lw=0.6)
-        ax.legend(loc="upper right", fontsize=8, frameon=False, ncol=3)
-
-        ax = fig.add_subplot(gs[row, 1])
-        waveform = waveforms.get(label, {})
-        mean = np.asarray(waveform.get("mean_waveform_deg", []), dtype=float)
-        sd = np.asarray(waveform.get("sd_waveform_deg", []), dtype=float)
-        if mean.size and not np.all(np.isnan(mean)):
-            percent = np.linspace(0.0, 100.0, len(mean))
-            colour = TRIAL_COLOURS.get(label, "#444444")
-            ax.fill_between(percent, mean - sd, mean + sd, color=colour, alpha=0.25,
-                            label="+/- 1 SD")
-            ax.plot(percent, mean, color=colour, lw=1.6, label="mean")
-            ax.set_title(
-                f"VR {waveform.get('waveform_variance_ratio', float('nan')):.2f}  "
-                f"SD {waveform.get('waveform_mean_sd_deg', float('nan')):.1f} deg",
-                fontsize=10,
-            )
-            ax.legend(loc="upper right", fontsize=8, frameon=False)
-        ax.set_ylabel("aligned yaw (deg)")
-        ax.grid(True, color="#dddddd", lw=0.6)
-
-    fig.axes[-2].set_xlabel("time (s)")
-    fig.axes[-1].set_xlabel("percent of segment")
-
-    metric_names = [
-        "chest_yaw_log10_dimensionless_jerk",
-        "chest_yaw_sparc",
-        "chest_yaw_submovement_rate_hz",
-        "chest_pelvis_lag_s",
-        "chest_pelvis_gain",
-        "relative_yaw_range_deg",
-    ]
-    pretty = ["log10 jerk", "SPARC", "submov (Hz)", "lag (s)", "gain", "rel ROM (deg)"]
-
-    bars_gs = gs[len(trials), :].subgridspec(1, len(metric_names))
-    for i, (name, title) in enumerate(zip(metric_names, pretty)):
-        ax = fig.add_subplot(bars_gs[0, i])
-        means = [metrics.loc[metrics.trial == label, name].mean() for label in trials]
-        sds = [metrics.loc[metrics.trial == label, name].std(ddof=1) for label in trials]
-        bars = ax.bar(range(len(trials)), means, yerr=sds, capsize=3,
-                      color=[TRIAL_COLOURS.get(label, "#444444") for label in trials])
-        ax.bar_label(bars, fmt="%.3g", padding=3, fontsize=8)
-        ax.set_xticks(range(len(trials)))
-        ax.set_xticklabels([label[:5] for label in trials], fontsize=9)
-        ax.set_title(title, fontsize=10)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    fig.suptitle("Sequence smoothness and chest-pelvis coordination, per part of the form",
-                 fontsize=14, fontweight="bold")
-    fig.savefig(OUTPUT_DIR / "sequence_smoothness_figure.png", dpi=220)
-    plt.close(fig)

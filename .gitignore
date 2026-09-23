@@ -1,1 +1,12 @@
 /data
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Interrupted atomic session writes
+outputs/*.tmp
+outputs/sessions/*.tmp

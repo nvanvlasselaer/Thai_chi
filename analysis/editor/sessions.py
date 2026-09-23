@@ -1,197 +1,127 @@
-#!/usr/bin/env python3
-"""Data layer for the Tai Chi event-window editor.
+"""The editor's session file: the curated event windows and how they were made.
 
-Three responsibilities, none of which involve Dash so that they can be exercised
-from a plain script:
+A session holds every event of the three families -- trunk rotation, monopodal
+stance and sequence segments -- with one window per recording, the detector
+settings that produced them, and the metric options in force.  Sample indices
+are authoritative; seconds are written alongside for readability and ignored on
+load, so there is no rounding ambiguity anywhere.
 
-* **Loading** — reconstitute a full :class:`Kinematics` without re-running the
-  Madgwick filter.  ``madgwick_imu`` is a pure-Python per-sample loop and is the
-  only slow part of the pipeline, but its output already sits in
-  ``outputs/orientation_*.npz``.  Parsing a raw CSV takes ~1.6 s, loading the
-  quaternions ~0.2 s and rederiving every joint angle from them ~0.35 s, so the
-  whole editor starts in about 4 s.
-* **Session state** — load, seed and save the curated windows.  Sample indices
-  are authoritative; seconds are written alongside for readability and ignored
-  on load, so there is no rounding ambiguity anywhere.
-* **Recalculation** — feed the curated windows through the pipeline's own metric
-  functions, unmodified, and write the same output files ``main()`` writes.
+This module seeds a session from the detectors, edits it (add, delete to a
+trash, restore), migrates older files, and keeps named copies alongside the
+working one.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-import event_detection as ed
-import sequence_smoothness
-from sequence_smoothness import make_sequence_smoothness_figure
-from tai_chi_trunk_and_knee import (
-    Kinematics,
-    OUTPUT_DIR,
-    NOVICE_CSV,
-    TRAINED_CSV,
-    TrialData,
-    compute_asymmetry_metrics,
-    compute_kinematics,
-    compute_knee_balance_metrics,
-    compute_trunk_rotation_balance_metrics,
-    find_knee_flexion_windows,
-    lowpass_signal,
-    make_knee_flexion_overview_figure,
-    make_knee_traceability_figure,
-    make_trunk_traceability_figure,
-    parse_IMU_csv,
-    quat_inverse,
-    quat_multiply,
-    quat_to_euler_deg,
-    save_orientation_npz,
-    summarize_knee_flexion_event,
-)
+from analysis import config, detection
+from analysis.config import TRIALS
+from analysis.detection import find_knee_flexion_windows
+from analysis.detection_v1 import find_stabilization as find_stabilization_v1
+from analysis.kinematics import LoadedTrial
+from analysis.signals import idx_to_sec, lowpass_signal, sec_to_idx
 
-SESSION_PATH = OUTPUT_DIR / "event_editor_session.json"
+SESSION_PATH = config.OUTPUT_DIR / "event_editor_session.json"
 SCHEMA_VERSION = 1
-TRIALS = ("Novice", "Trained")
-CSV_FOR_TRIAL = {"Novice": NOVICE_CSV, "Trained": TRAINED_CSV}
 KNEE_THRESHOLD_DEG = 60.0
 
-# Joint angles are relative orientations between a proximal and a distal sensor.
-# The pairs and their order mirror compute_kinematics() exactly.
-JOINT_SENSOR_PAIRS = {
-    "left_hip_deg": ("lumbar", "lthigh"),
-    "right_hip_deg": ("lumbar", "rthigh"),
-    "left_knee_deg": ("lthigh", "ltibia"),
-    "right_knee_deg": ("rthigh", "rtibia"),
-    "left_ankle_deg": ("ltibia", "lfoot"),
-    "right_ankle_deg": ("rtibia", "rfoot"),
-    "left_shoulder_deg": ("chestbone", "lhumerus"),
-    "right_shoulder_deg": ("chestbone", "rhumerus"),
-    "left_elbow_deg": ("lhumerus", "lulna"),
-    "right_elbow_deg": ("rhumerus", "rulna"),
+
+# ---------------------------------------------------------------------------
+# Event families
+# ---------------------------------------------------------------------------
+
+
+FAMILY_KEY = {"trunk": "trunk_events", "knee": "knee_events", "smooth": "smooth_events"}
+FAMILY_PREFIX = {"trunk": "trunk", "knee": "knee", "smooth": "smooth"}
+FAMILIES = tuple(FAMILY_KEY)
+STABILIZED_FAMILIES = ("trunk", "knee")
+"""Families whose events carry a stabilization window.  Sequence segments do
+not: they tile the movement, and there is nothing to settle from."""
+
+
+FAMILY_DESCRIPTION = {
+    "trunk": lambda event: "trunk rotation",
+    "knee": lambda event: f"{event.get('flexed_leg', '?')} knee",
+    "smooth": lambda event: "sequence part",
 }
 
 
 # ---------------------------------------------------------------------------
-# Loading
+# Metric options recorded in new sessions
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class LoadedTrial:
-    """Everything the editor needs for one recording."""
-
-    label: str
-    kin: Kinematics
-    trial: TrialData
-    fs: float
-    n_samples: int
-
-    @property
-    def duration_s(self) -> float:
-        return float(self.kin.t[-1])
+LAG_PAD_S = 2.0
+"""Seconds added each side of an event for the coordination-lag window only."""
 
 
-def orientation_path(label: str) -> Path:
-    return OUTPUT_DIR / f"orientation_{label.lower()}.npz"
+KNEE_LAG_WINDOW_S = (2.0, 3.0)
+"""Seconds before/after peak knee flexion for the coordination-lag window.
 
-
-def relative_euler(quats: dict[str, np.ndarray], proximal: str, distal: str) -> np.ndarray:
-    """Euler angles of the distal segment expressed in the proximal frame."""
-    return quat_to_euler_deg(quat_multiply(quat_inverse(quats[proximal]), quats[distal]))
-
-
-def load_trial(label: str, recompute_orientation: bool = False) -> LoadedTrial:
-    """Load one recording, rebuilding kinematics from the cached quaternions.
-
-    The npz is trusted as the Madgwick output.  If the orientation code itself
-    changes, pass ``recompute_orientation=True`` to run the real
-    ``compute_kinematics`` and rewrite the npz.
-    """
-    csv_path = CSV_FOR_TRIAL[label]
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"Raw recording not found: {csv_path}\n"
-            "data/ is git-ignored, so a fresh clone has no IMU CSVs."
-        )
-
-    trial = parse_IMU_csv(csv_path, label)
-    n = min(len(df) for df in trial.data.values())
-
-    if recompute_orientation:
-        kin = compute_kinematics(trial)
-        save_orientation_npz(label, kin)
-        return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=len(kin.t))
-
-    npz_path = orientation_path(label)
-    if not npz_path.exists():
-        raise FileNotFoundError(
-            f"Orientation cache not found: {npz_path}\n"
-            "Run the pipeline once, or start the editor with --recompute-orientation."
-        )
-
-    with np.load(npz_path) as data:
-        time_s = data["time_s"]
-        quats = {key[: -len("_q_wxyz")]: data[key][:n] for key in data.files if key.endswith("_q_wxyz")}
-
-    if len(time_s) != n:
-        raise ValueError(
-            f"{npz_path.name} holds {len(time_s)} samples but {csv_path.name} parses to {n}. "
-            "The orientation cache is out of sync with the recording; "
-            "restart with --recompute-orientation."
-        )
-
-    eulers = {sensor: quat_to_euler_deg(q) for sensor, q in quats.items()}
-    omega = {
-        sensor: np.linalg.norm(
-            trial.data[sensor][["gyro_x_dps", "gyro_y_dps", "gyro_z_dps"]].to_numpy()[:n], axis=1
-        )
-        for sensor in quats
-    }
-    joints = {
-        field: relative_euler(quats, proximal, distal)
-        for field, (proximal, distal) in JOINT_SENSOR_PAIRS.items()
-    }
-
-    kin = Kinematics(
-        t=time_s,
-        quaternions=quats,
-        eulers_deg=eulers,
-        omega_mag=omega,
-        trunk_rel_euler_deg=relative_euler(quats, "lumbar", "chestbone"),
-        **joints,
-    )
-    return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=n)
-
-
-def load_all_trials(recompute_orientation: bool = False) -> dict[str, LoadedTrial]:
-    return {label: load_trial(label, recompute_orientation) for label in TRIALS}
+The pipeline default is (1.0, 2.0), a 3 s window, but ``cross_correlation_lag``
+searches +/-2 s, so at the extreme lag only 1 s of the two signals overlaps and
+the overlap-normalised correlation is dominated by that short tail: 9 of 11
+events rail at the bound.  Widening to 5 s keeps 60 % overlap at the extreme and
+drops the mean |lag| from 1.72 s to 0.19 s.  Going wider still starts absorbing
+neighbouring movements and the lag drifts up again, so 5 s is the useful point.
+"""
 
 
 # ---------------------------------------------------------------------------
-# Index/time conversion
-#
-# The pipeline converts an index to seconds as idx / fs, so the exact inverse is
-# round(t * fs).  Truncating instead shifts the window by one sample, which
-# changes lumbar_ap_acc_variance_g2 by ~0.8 % -- small enough to miss, large
-# enough to matter.  Every conversion in the editor goes through these two.
+# Reading and writing
 # ---------------------------------------------------------------------------
 
 
-def sec_to_idx(seconds: float, fs: float, n_samples: int) -> int:
-    return int(np.clip(round(float(seconds) * fs), 0, n_samples - 1))
+def load_session(path: Path = SESSION_PATH) -> dict | None:
+    if not path.exists():
+        return None
+    with path.open() as handle:
+        return json.load(handle)
 
 
-def idx_to_sec(index: int, fs: float) -> float:
-    return float(index) / fs
+def save_session(session: dict, path: Path = SESSION_PATH) -> None:
+    """Write the session atomically so an interrupted save cannot corrupt it."""
+    session = dict(session)
+    session["modified_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # Re-read the flag on every write rather than only when the session was
+    # seeded.  It describes the code that produced the numbers, not the
+    # curation, so a stored copy from an older run would misreport how the
+    # current CSVs were computed.
+    session["ignore_high_pass_filter"] = _ignore_high_pass_flag()
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as handle:
+        json.dump(session, handle, indent=2)
+    os.replace(tmp, path)
+
+
+def _ignore_high_pass_flag() -> bool:
+    return bool(config.IGNORE_HIGH_PASS_FILTER)
+
+
+def refresh_seconds(session: dict, trials: dict[str, LoadedTrial]) -> dict:
+    """Recompute the derived ``*_s`` display fields from the authoritative indices."""
+    for family in FAMILIES:
+        for event in session.get(FAMILY_KEY[family], []):
+            for label, window in event.get("windows", {}).items():
+                fs = trials[label].fs
+                # Sequence segments carry no stabilization band, so only the
+                # keys actually present are mirrored into seconds.
+                for key in ("event_start", "event_end", "stab_start", "stab_end"):
+                    if key in window:
+                        window[f"{key}_s"] = round(idx_to_sec(window[key], fs), 4)
+    return session
 
 
 # ---------------------------------------------------------------------------
-# Session state
+# Seeding from the detectors
 # ---------------------------------------------------------------------------
 
 
@@ -231,16 +161,16 @@ def _movement_window_dict(start: int, end: int, fs: float, **extra) -> dict:
 
 def seed_session(
     trials: dict[str, LoadedTrial],
-    trunk_params: ed.TrunkDetectorParams | None = None,
-    stab_params: ed.StabilizationParams | None = None,
-    knee_params: ed.KneeDetectorParams | None = None,
-    segment_params: ed.SegmentDetectorParams | None = None,
+    trunk_params: detection.TrunkDetectorParams | None = None,
+    stab_params: detection.StabilizationParams | None = None,
+    knee_params: detection.KneeDetectorParams | None = None,
+    segment_params: detection.SegmentDetectorParams | None = None,
 ) -> dict:
     """Build a fresh session by running the detectors on both recordings."""
-    trunk_params = trunk_params or ed.TrunkDetectorParams()
-    stab_params = stab_params or ed.StabilizationParams()
-    knee_params = knee_params or ed.KneeDetectorParams()
-    segment_params = segment_params or ed.SegmentDetectorParams()
+    trunk_params = trunk_params or detection.TrunkDetectorParams()
+    stab_params = stab_params or detection.StabilizationParams()
+    knee_params = knee_params or detection.KneeDetectorParams()
+    segment_params = segment_params or detection.SegmentDetectorParams()
 
     novice, trained = trials["Novice"], trials["Trained"]
     windows, _ = detect_trunk_windows(trials, trunk_params, stab_params)
@@ -268,7 +198,7 @@ def seed_session(
         "fs": {label: trial.fs for label, trial in trials.items()},
         "n_samples": {label: trial.n_samples for label, trial in trials.items()},
         "ignore_high_pass_filter": _ignore_high_pass_flag(),
-        "detector": ed.params_to_dict(trunk_params, stab_params, knee_params, segment_params),
+        "detector": detection.params_to_dict(trunk_params, stab_params, knee_params, segment_params),
         "lag_pad_s": LAG_PAD_S,
         "knee_lag_window_s": list(KNEE_LAG_WINDOW_S),
         "trunk_events": trunk_events,
@@ -277,31 +207,25 @@ def seed_session(
     }
 
 
-def _ignore_high_pass_flag() -> bool:
-    import tai_chi_trunk_and_knee as pipeline
-
-    return bool(pipeline.Ignore_high_pass_filter)
-
-
 def detect_trunk_windows(
     trials: dict[str, LoadedTrial],
-    trunk_params: ed.TrunkDetectorParams,
-    stab_params: ed.StabilizationParams,
+    trunk_params: detection.TrunkDetectorParams,
+    stab_params: detection.StabilizationParams,
 ) -> tuple[dict[str, list[tuple[int, int, int, int, float]]], list[float]]:
     """Detect trunk events in both recordings and pair them by order.
 
     Each entry is ``(event_start, event_end, stab_start, stab_end, quiet_ratio)``.
     """
     novice, trained = trials["Novice"], trials["Trained"]
-    windows, _, _ = ed.pair_trunk_events(
+    windows, _, _ = detection.pair_trunk_events(
         novice.kin, trained.kin, novice.fs, trained.fs, trunk_params, stab_params
     )
     return windows, []
 
 
 def detect_knee_windows(
-    loaded: LoadedTrial, side: str, knee_params: ed.KneeDetectorParams,
-    stab_params: ed.StabilizationParams, omega: ed.StabilizationDiagnostics,
+    loaded: LoadedTrial, side: str, knee_params: detection.KneeDetectorParams,
+    stab_params: detection.StabilizationParams, omega: detection.StabilizationDiagnostics,
 ) -> list[dict]:
     """Knee-flexion events for one leg of one recording, in time order."""
     angle = loaded.kin.left_knee_deg[:, 0] if side == "Left" else loaded.kin.right_knee_deg[:, 0]
@@ -315,7 +239,7 @@ def detect_knee_windows(
     out = []
     for start, end in windows:
         peak_idx = start + int(np.argmax(knee_abs[start:end]))
-        stab = ed.find_stabilization(loaded.kin, loaded.fs, peak_idx, stab_params, diagnostics=omega)
+        stab = detection.find_stabilization(loaded.kin, loaded.fs, peak_idx, stab_params, diagnostics=omega)
         out.append(_window_dict(start, end, stab.start, stab.end, fs=loaded.fs,
                                 stab_quiet_ratio=round(stab.quiet_ratio, 3)))
     return out
@@ -323,8 +247,8 @@ def detect_knee_windows(
 
 def seed_knee_events(
     trials: dict[str, LoadedTrial],
-    stab_params: ed.StabilizationParams | None = None,
-    knee_params: ed.KneeDetectorParams | None = None,
+    stab_params: detection.StabilizationParams | None = None,
+    knee_params: detection.KneeDetectorParams | None = None,
 ) -> list[dict]:
     """Detect monopodal-stance events and pair them across the two recordings.
 
@@ -338,9 +262,9 @@ def seed_knee_events(
     becomes a single-sided event: it keeps a window for the recording it was
     found in and contributes nothing to the other.
     """
-    stab_params = stab_params or ed.StabilizationParams()
-    knee_params = knee_params or ed.KneeDetectorParams()
-    omega = {label: ed.combined_omega(trials[label].kin, trials[label].fs, stab_params)
+    stab_params = stab_params or detection.StabilizationParams()
+    knee_params = knee_params or detection.KneeDetectorParams()
+    omega = {label: detection.combined_omega(trials[label].kin, trials[label].fs, stab_params)
              for label in TRIALS}
 
     events: list[dict] = []
@@ -365,7 +289,7 @@ def seed_knee_events(
 
 def seed_smooth_events(
     trials: dict[str, LoadedTrial],
-    segment_params: ed.SegmentDetectorParams | None = None,
+    segment_params: detection.SegmentDetectorParams | None = None,
 ) -> list[dict]:
     """Cut both recordings into parts of the sequence and pair them by order.
 
@@ -376,10 +300,10 @@ def seed_smooth_events(
     itself worth seeing.  A surplus part becomes a single-sided event, as for
     monopodal stances.
     """
-    segment_params = segment_params or ed.SegmentDetectorParams()
+    segment_params = segment_params or detection.SegmentDetectorParams()
 
     per_trial = {
-        label: ed.detect_yaw_cycle_segments(trials[label].kin, trials[label].fs, segment_params)[0]
+        label: detection.detect_yaw_cycle_segments(trials[label].kin, trials[label].fs, segment_params)[0]
         for label in TRIALS
     }
 
@@ -419,23 +343,11 @@ def _sort_and_number(events: list[dict], family: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-FAMILY_KEY = {"trunk": "trunk_events", "knee": "knee_events", "smooth": "smooth_events"}
-FAMILY_PREFIX = {"trunk": "trunk", "knee": "knee", "smooth": "smooth"}
-FAMILIES = tuple(FAMILY_KEY)
-STABILIZED_FAMILIES = ("trunk", "knee")
-"""Families whose events carry a stabilization window.  Sequence segments do
-not: they tile the movement, and there is nothing to settle from."""
 DEFAULT_TRUNK_EVENT_S = 3.0
 DEFAULT_KNEE_EVENT_S = 2.0
 DEFAULT_SMOOTH_EVENT_S = 10.0
 DEFAULT_STAB_GAP_S = 0.1
 """Gap between the end of a new event and the start of its stabilization window."""
-
-FAMILY_DESCRIPTION = {
-    "trunk": lambda event: "trunk rotation",
-    "knee": lambda event: f"{event.get('flexed_leg', '?')} knee",
-    "smooth": lambda event: "sequence part",
-}
 
 
 def events_of(session: dict, family: str) -> list[dict]:
@@ -593,6 +505,11 @@ def describe_trashed(entry: dict, trials: dict[str, LoadedTrial]) -> str:
     return f"{event['event_id']} - {kind}  {label[:1]} {span}  [{sides}]"
 
 
+# ---------------------------------------------------------------------------
+# Migrating older session files
+# ---------------------------------------------------------------------------
+
+
 def _is_legacy_knee_event(event: dict) -> bool:
     """Pre-pairing shape: one trial per event, boundaries at the top level."""
     return "windows" not in event and "trial" in event
@@ -659,7 +576,7 @@ def migrate_session(
     notes: list[str] = []
 
     if "smooth_events" not in session and trials is not None:
-        params = ed.params_from_dict(session.get("detector", {}) or {})[3]
+        params = detection.params_from_dict(session.get("detector", {}) or {})[3]
         session["smooth_events"] = seed_smooth_events(trials, params)
         session.setdefault("detector", {}).update(
             {f"smooth_{k}": v for k, v in asdict(params).items()}
@@ -707,7 +624,7 @@ def migrate_session(
 # ---------------------------------------------------------------------------
 
 
-SESSIONS_DIR = OUTPUT_DIR / "sessions"
+SESSIONS_DIR = config.OUTPUT_DIR / "sessions"
 PREVIOUS_SLOT = "_previous"
 """Where the working session is parked before a load, as a one-step undo."""
 
@@ -799,10 +716,10 @@ def park_working_session() -> bool:
 
 def start_new_session(
     trials: dict[str, LoadedTrial],
-    trunk_params: ed.TrunkDetectorParams | None = None,
-    stab_params: ed.StabilizationParams | None = None,
-    knee_params: ed.KneeDetectorParams | None = None,
-    segment_params: ed.SegmentDetectorParams | None = None,
+    trunk_params: detection.TrunkDetectorParams | None = None,
+    stab_params: detection.StabilizationParams | None = None,
+    knee_params: detection.KneeDetectorParams | None = None,
+    segment_params: detection.SegmentDetectorParams | None = None,
 ) -> dict:
     """Discard the working session and detect all families afresh.
 
@@ -826,462 +743,6 @@ def delete_named_session(name: str) -> None:
         path.unlink()
 
 
-def load_session(path: Path = SESSION_PATH) -> dict | None:
-    if not path.exists():
-        return None
-    with path.open() as handle:
-        return json.load(handle)
-
-
-def save_session(session: dict, path: Path = SESSION_PATH) -> None:
-    """Write the session atomically so an interrupted save cannot corrupt it."""
-    session = dict(session)
-    session["modified_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    # Re-read the flag on every write rather than only when the session was
-    # seeded.  It describes the code that produced the numbers, not the
-    # curation, so a stored copy from an older run would misreport how the
-    # current CSVs were computed.
-    session["ignore_high_pass_filter"] = _ignore_high_pass_flag()
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w") as handle:
-        json.dump(session, handle, indent=2)
-    os.replace(tmp, path)
-
-
-def refresh_seconds(session: dict, trials: dict[str, LoadedTrial]) -> dict:
-    """Recompute the derived ``*_s`` display fields from the authoritative indices."""
-    for family in FAMILIES:
-        for event in session.get(FAMILY_KEY[family], []):
-            for label, window in event.get("windows", {}).items():
-                fs = trials[label].fs
-                # Sequence segments carry no stabilization band, so only the
-                # keys actually present are mirrored into seconds.
-                for key in ("event_start", "event_end", "stab_start", "stab_end"):
-                    if key in window:
-                        window[f"{key}_s"] = round(idx_to_sec(window[key], fs), 4)
-    return session
-
-
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-MIN_EVENT_S = 0.2
-"""Hard floor: below ~24 samples (0.065 s) lowpass_signal silently returns the
-signal unfiltered.  Kept permissive because find_knee_flexion_windows accepts
-events from 0.4 s, and the editor must be able to load what the pipeline
-produced."""
-
-SHORT_EVENT_WARN_S = 1.0
-"""Below this the smoothness metrics are computed over very few cycles."""
-
-MIN_STAB_S = 0.5
-"""count_corrective_peaks calls find_peaks(distance=int(0.3*fs))."""
-
-LAG_SATURATION_WARN_S = 4.0
-"""cross_correlation_lag searches +/-2 s; a shorter window saturates the lag."""
-
-LOW_CONFIDENCE_RATIO = 1.6
-
-
-@dataclass
-class Issue:
-    event_id: str
-    trial: str
-    severity: str  # "error" or "warning"
-    message: str
-
-
-def validate_window(event_id: str, trial: str, window: dict, fs: float, n_samples: int) -> list[Issue]:
-    issues: list[Issue] = []
-    start, end = window["event_start"], window["event_end"]
-    # Sequence segments have no stabilization band; everything about one is
-    # skipped rather than defaulted, so a missing band cannot read as a broken one.
-    has_stab = "stab_start" in window and "stab_end" in window
-    stab_start, stab_end = window.get("stab_start", 0), window.get("stab_end", 0)
-
-    def error(message: str) -> None:
-        issues.append(Issue(event_id, trial, "error", message))
-
-    def warn(message: str) -> None:
-        issues.append(Issue(event_id, trial, "warning", message))
-
-    spans = {"event": (start, end)}
-    if has_stab:
-        spans["stabilization"] = (stab_start, stab_end)
-    for name, (lo, hi) in spans.items():
-        if not (0 <= lo < hi <= n_samples - 1):
-            error(f"{name} window [{lo}, {hi}] is out of order or outside the recording")
-
-    duration_s = (end - start) / fs
-    if end > start and duration_s < MIN_EVENT_S:
-        error(f"event window is {duration_s:.2f} s, shorter than the {MIN_EVENT_S:.2f} s minimum")
-    if has_stab and stab_end > stab_start and (stab_end - stab_start) / fs < MIN_STAB_S:
-        error(
-            f"stabilization window is {(stab_end - stab_start) / fs:.2f} s, "
-            f"shorter than the {MIN_STAB_S:.1f} s minimum"
-        )
-
-    if end > start and duration_s < SHORT_EVENT_WARN_S:
-        warn(f"event is only {duration_s:.2f} s; smoothness metrics span very few cycles")
-    elif end > start and duration_s < LAG_SATURATION_WARN_S:
-        warn(
-            f"event is {duration_s:.2f} s; the coordination lag searches +/-2 s "
-            "and may saturate on a window this short"
-        )
-    if has_stab:
-        if stab_start <= end:
-            warn("stabilization overlaps the event")
-        ratio = window.get("stab_quiet_ratio")
-        if ratio is not None and ratio > LOW_CONFIDENCE_RATIO:
-            warn(f"stabilization is {ratio:.2f}x the quiet baseline - the participant may not have settled")
-    return issues
-
-
-SEGMENT_OVERLAP_WARN_S = 0.5
-"""Sequence segments tile the form, so neighbours should meet.  A gap or an
-overlap larger than this is usually a boundary dragged past its neighbour."""
-
-
-def check_segment_continuity(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
-    """Flag sequence segments that overlap or leave a hole against their neighbour.
-
-    Unlike the other two families these windows are meant to abut: each ends
-    where the chest passes neutral and the next begins.  A real pause in the
-    form leaves a legitimate gap, so this warns rather than errors.
-    """
-    issues: list[Issue] = []
-    for label in TRIALS:
-        fs = trials[label].fs
-        spans = [
-            (event["event_id"], event["windows"][label])
-            for event in events
-            if label in event.get("windows", {})
-        ]
-        spans.sort(key=lambda item: item[1]["event_start"])
-        for (_, first), (event_id, second) in zip(spans[:-1], spans[1:]):
-            overlap_s = (first["event_end"] - second["event_start"]) / fs
-            if overlap_s > SEGMENT_OVERLAP_WARN_S:
-                issues.append(Issue(event_id, label, "warning",
-                                    f"overlaps the previous segment by {overlap_s:.2f} s"))
-    return issues
-
-
-PAIR_OFFSET_TOLERANCE_S = 8.0
-"""How far a pair's novice-to-trained offset may sit from the typical one."""
-
-
-def check_pairing(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
-    """Flag pairs whose two windows sit at an atypical offset from each other.
-
-    Both participants perform the same form, so across a family the novice and
-    trained windows should be separated by roughly a constant offset -- whatever
-    the difference in when each recording started and how fast each moves.  A
-    pair far from that typical offset is usually a mispairing rather than a real
-    difference, since pairing is by order and one missing event shifts the rest.
-    Comparing against the median offset rather than against zero keeps this
-    robust to the recordings simply not starting together.
-    """
-    offsets = {}
-    for event in events:
-        windows = event.get("windows", {})
-        if not all(label in windows for label in TRIALS):
-            continue
-        offsets[event["event_id"]] = (
-            windows["Novice"]["event_start"] / trials["Novice"].fs
-            - windows["Trained"]["event_start"] / trials["Trained"].fs
-        )
-    if len(offsets) < 3:
-        return []  # too few pairs for a typical offset to mean anything
-
-    typical = float(np.median(list(offsets.values())))
-    return [
-        Issue(event_id, "both", "warning",
-              f"novice and trained windows are {offset:+.1f} s apart, against a typical "
-              f"{typical:+.1f} s for this set - check they are the same movement")
-        for event_id, offset in offsets.items()
-        if abs(offset - typical) > PAIR_OFFSET_TOLERANCE_S
-    ]
-
-
-def validate_session(session: dict, trials: dict[str, LoadedTrial]) -> list[Issue]:
-    issues: list[Issue] = []
-    for family in FAMILIES:
-        enabled = [e for e in session.get(FAMILY_KEY[family], []) if e.get("enabled", True)]
-        for event in enabled:
-            for label, window in event.get("windows", {}).items():
-                loaded = trials[label]
-                issues += validate_window(
-                    event["event_id"], label, window, loaded.fs, loaded.n_samples
-                )
-        issues += check_pairing(enabled, trials)
-        if family == "smooth":
-            issues += check_segment_continuity(enabled, trials)
-    return issues
-
-
-# ---------------------------------------------------------------------------
-# Recalculation
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class RecomputeResult:
-    trunk_metrics: pd.DataFrame
-    knee_metrics: pd.DataFrame
-    asymmetry: pd.DataFrame
-    smooth_metrics: pd.DataFrame
-    variability: pd.DataFrame
-    written: list[str]
-    log: list[str]
-
-
-LAG_BOUND_S = 2.0
-"""cross_correlation_lag's max_lag_s; a result at the bound is not a measurement."""
-
-LAG_PAD_S = 2.0
-"""Seconds added each side of an event for the coordination-lag window only."""
-
-KNEE_LAG_WINDOW_S = (2.0, 3.0)
-"""Seconds before/after peak knee flexion for the coordination-lag window.
-
-The pipeline default is (1.0, 2.0), a 3 s window, but ``cross_correlation_lag``
-searches +/-2 s, so at the extreme lag only 1 s of the two signals overlaps and
-the overlap-normalised correlation is dominated by that short tail: 9 of 11
-events rail at the bound.  Widening to 5 s keeps 60 % overlap at the extreme and
-drops the mean |lag| from 1.72 s to 0.19 s.  Going wider still starts absorbing
-neighbouring movements and the lag drifts up again, so 5 s is the useful point.
-"""
-
-
-def flag_saturated_lags(metrics: pd.DataFrame, columns: list[str]) -> list[str]:
-    notes = []
-    for column in columns:
-        if column not in metrics:
-            continue
-        saturated = metrics[np.abs(metrics[column]) >= 0.99 * LAG_BOUND_S]
-        for _, row in saturated.iterrows():
-            notes.append(
-                f"{row['trial']}: {column} = {row[column]:+.3f} s is at the +/-{LAG_BOUND_S} s "
-                "search bound, so the cross-correlation did not find a peak"
-            )
-    return notes
-
-
-def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True) -> RecomputeResult:
-    """Run the curated windows through the pipeline's own metric functions.
-
-    Every metric call here is the same function ``main()`` calls, with the same
-    arguments, so curated numbers are directly comparable to automatic ones.
-    """
-    log: list[str] = []
-    errors = [i for i in validate_session(session, trials) if i.severity == "error"]
-    if errors:
-        raise ValueError(
-            "Cannot recalculate while windows are invalid:\n"
-            + "\n".join(f"  {i.event_id} ({i.trial}): {i.message}" for i in errors)
-        )
-
-    # Velocity-segmented events are often shorter than the +/-2 s lag search, so
-    # the cross-correlation gets a padded window.  Sessions seeded from the v1
-    # windows leave this None and reproduce the original numbers exactly.
-    lag_pad_s = session.get("lag_pad_s")
-    _, _, session_knee_params, _ = ed.params_from_dict(session.get("detector", {}) or {})
-    knee_threshold = session_knee_params.threshold_deg
-    knee_lag = session.get("knee_lag_window_s")
-    knee_lag_kwargs = (
-        {"lag_pre_s": float(knee_lag[0]), "lag_post_s": float(knee_lag[1])} if knee_lag else {}
-    )
-
-    trunk_rows: list[dict] = []
-    trunk_windows: dict[str, list[tuple]] = {"Novice": [], "Trained": []}
-
-    enabled_trunk = [e for e in session.get("trunk_events", []) if e.get("enabled", True)]
-    for event in enabled_trunk:
-        for label in TRIALS:
-            loaded = trials[label]
-            window = event["windows"][label]
-            start, end = window["event_start"], window["event_end"]
-            stab_start, stab_end = window["stab_start"], window["stab_end"]
-
-            peak = ed.recompute_trunk_peak(loaded.kin, loaded.fs, start, end) if label == "Novice" else np.nan
-            trunk_windows[label].append((start, end, stab_start, stab_end, peak))
-
-            # Metric rows alternate Novice/Trained per event, as main() emits them.
-            trunk_rows.append(
-                compute_trunk_rotation_balance_metrics(
-                    label, loaded.kin, loaded.trial, start, end, stab_start, stab_end,
-                    lag_pad_s=lag_pad_s,
-                )
-            )
-
-    # The window CSV is grouped by trial, not interleaved -- also as main() emits it.
-    trunk_event_rows: list[dict] = []
-    for label, windows in trunk_windows.items():
-        fs = trials[label].fs
-        for index, (start, end, stab_start, stab_end, peak) in enumerate(windows, 1):
-            trunk_event_rows.append(
-                {
-                    "trial": label,
-                    "event_index": index,
-                    "event_start_s": idx_to_sec(start, fs),
-                    "event_end_s": idx_to_sec(end, fs),
-                    "event_peak_s": idx_to_sec(peak, fs) if label == "Novice" else np.nan,
-                    "stabilization_start_s": idx_to_sec(stab_start, fs),
-                    "stabilization_end_s": idx_to_sec(stab_end, fs),
-                }
-            )
-
-    trunk_metrics = pd.DataFrame(trunk_rows)
-    log.append(f"Trunk rotation: {len(enabled_trunk)} events x 2 trials = {len(trunk_rows)} metric rows")
-
-    knee_rows: list[dict] = []
-    knee_event_rows: list[dict] = []
-    knee_events: dict[str, list[dict]] = {"Novice": [], "Trained": []}
-    stab_overrides: dict[str, list[tuple[int, int]]] = {"Novice": [], "Trained": []}
-
-    enabled_knee = [e for e in session.get("knee_events", []) if e.get("enabled", True)]
-    for index, event in enumerate(enabled_knee, 1):
-        side = event["flexed_leg"]
-        for label in TRIALS:
-            window = event["windows"].get(label)
-            if window is None:
-                continue  # single-sided event: this recording contributes nothing
-            loaded = trials[label]
-            start, end = window["event_start"], window["event_end"]
-            stab_start, stab_end = window["stab_start"], window["stab_end"]
-
-            summary = summarize_knee_flexion_event(
-                label, loaded.kin, loaded.fs, side, start, end, threshold_deg=knee_threshold
-            )
-            summary["stabilization_start_s"] = idx_to_sec(stab_start, loaded.fs)
-            summary["stabilization_end_s"] = idx_to_sec(stab_end, loaded.fs)
-            knee_events[label].append(summary)
-            stab_overrides[label].append((stab_start, stab_end))
-
-            knee_rows.append(
-                compute_knee_balance_metrics(
-                    label, loaded.kin, loaded.trial, side, start, end,
-                    stab_start=stab_start, stab_end=stab_end, **knee_lag_kwargs,
-                )
-            )
-            knee_event_rows.append(
-                {
-                    "trial": label,
-                    "event_index": index,
-                    "flexed_leg": side,
-                    "stance_leg": summary["stance_leg"],
-                    "window_start_s": summary["window_start_s"],
-                    "window_end_s": summary["window_end_s"],
-                    "peak_time_s": summary["peak_time_s"],
-                    "peak_abs_knee_flexion_deg": summary["peak_abs_knee_flexion_deg"],
-                    "stabilization_start_s": summary["stabilization_start_s"],
-                    "stabilization_end_s": summary["stabilization_end_s"],
-                }
-            )
-
-    # Window CSVs are grouped by trial and metric CSVs interleave the pair, which
-    # is the convention the trunk family already follows.
-    knee_event_rows.sort(key=lambda r: (TRIALS.index(r["trial"]), r["event_index"]))
-
-    knee_metrics = pd.DataFrame(knee_rows)
-    asymmetry = compute_asymmetry_metrics(knee_metrics)
-    log.append(f"Monopodal stance: {len(enabled_knee)} events")
-
-    smooth_rows: list[dict] = []
-    waveform_segments: dict[str, list[np.ndarray]] = {label: [] for label in TRIALS}
-    enabled_smooth = [e for e in session.get("smooth_events", []) if e.get("enabled", True)]
-    # The detrended yaw traces are the same for every segment of a recording, so
-    # they are filtered once here rather than inside each of ~26 metric calls.
-    detrended = {label: sequence_smoothness.detrended_yaw(trials[label].kin, trials[label].fs)
-                 for label in TRIALS}
-    for event in enabled_smooth:
-        for label in TRIALS:
-            window = event["windows"].get(label)
-            if window is None:
-                continue  # single-sided segment
-            loaded = trials[label]
-            start, end = window["event_start"], window["event_end"]
-            smooth_rows.append(
-                sequence_smoothness.compute_sequence_smoothness_metrics(
-                    label, loaded.kin, loaded.fs, event["event_id"], start, end,
-                    lag_pad_s=lag_pad_s, yaw=detrended[label],
-                )
-            )
-            waveform_segments[label].append(detrended[label][0][start:end])
-
-    smooth_metrics = pd.DataFrame(smooth_rows)
-    waveforms = {label: sequence_smoothness.waveform_consistency(segments)
-                 for label, segments in waveform_segments.items()}
-    variability = (
-        sequence_smoothness.summarize_sequence_variability(smooth_metrics, waveforms)
-        if len(smooth_metrics) else pd.DataFrame()
-    )
-    log.append(f"Sequence smoothness: {len(enabled_smooth)} segments")
-
-    for note in flag_saturated_lags(smooth_metrics, ["chest_pelvis_lag_s"]):
-        log.append("WARNING  " + note)
-    for note in flag_saturated_lags(trunk_metrics, ["trunk_pelvis_lag_s"]):
-        log.append("WARNING  " + note)
-    for note in flag_saturated_lags(knee_metrics, ["trunk_pelvis_lag_s", "trunk_pelvis_pitch_lag_s"]):
-        log.append("WARNING  " + note)
-
-    written: list[str] = []
-    if write:
-        OUTPUT_DIR.mkdir(exist_ok=True)
-
-        def write_csv(frame: pd.DataFrame, name: str) -> None:
-            if len(frame) == 0:
-                log.append(f"skipped {name} (no rows)")
-                return
-            frame.to_csv(OUTPUT_DIR / name, index=False)
-            written.append(name)
-
-        write_csv(pd.DataFrame(trunk_event_rows), "trunk_rotation_event_windows.csv")
-        write_csv(trunk_metrics, "trunk_rotation_balance_metrics.csv")
-        write_csv(pd.DataFrame(knee_event_rows), "monopodal_stance_event_windows.csv")
-        write_csv(knee_metrics, "monopodal_stance_balance_metrics.csv")
-        write_csv(asymmetry, "monopodal_stance_asymmetry_metrics.csv")
-        write_csv(smooth_metrics, "sequence_smoothness_metrics.csv")
-        write_csv(variability, "sequence_variability_summary.csv")
-
-        novice, trained = trials["Novice"], trials["Trained"]
-        if len(trunk_metrics) > 0:
-            make_trunk_traceability_figure(
-                novice.kin, trained.kin, trunk_metrics, trunk_windows, novice.fs
-            )
-            written.append("trunk_traceability_figure.png")
-        if len(knee_metrics) > 0:
-            make_knee_flexion_overview_figure(novice.kin, trained.kin, knee_events, novice.fs)
-            written.append("monopodal_stance_overview_figure.png")
-            make_knee_traceability_figure(
-                novice.kin, trained.kin, knee_metrics, knee_events, novice.fs,
-                stab_overrides=stab_overrides,
-            )
-            written.append("monopodal_stance_traceability_figure.png")
-        if len(smooth_metrics) > 0:
-            make_sequence_smoothness_figure(
-                {label: detrended[label] for label in TRIALS},
-                {label: trials[label].fs for label in TRIALS},
-                smooth_metrics, waveforms,
-            )
-            written.append("sequence_smoothness_figure.png")
-
-        save_session(refresh_seconds(session, trials))
-        written.append(SESSION_PATH.name)
-
-    return RecomputeResult(
-        trunk_metrics=trunk_metrics,
-        knee_metrics=knee_metrics,
-        asymmetry=asymmetry,
-        smooth_metrics=smooth_metrics,
-        variability=variability,
-        written=written,
-        log=log,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Seeding from the committed v1 outputs, for comparison
 # ---------------------------------------------------------------------------
@@ -1299,8 +760,8 @@ def seed_session_from_v1_csvs(trials: dict[str, LoadedTrial]) -> dict:
     original metric definitions.  A session seeded this way will therefore report
     different coordination lags from one seeded by the detectors, which set both.
     """
-    trunk_csv = OUTPUT_DIR / "trunk_rotation_event_windows.csv"
-    knee_csv = OUTPUT_DIR / "monopodal_stance_event_windows.csv"
+    trunk_csv = config.OUTPUT_DIR / "trunk_rotation_event_windows.csv"
+    knee_csv = config.OUTPUT_DIR / "monopodal_stance_event_windows.csv"
     if not trunk_csv.exists() or not knee_csv.exists():
         raise FileNotFoundError("Committed v1 window CSVs not found in outputs/")
 
@@ -1327,10 +788,6 @@ def seed_session_from_v1_csvs(trials: dict[str, LoadedTrial]) -> dict:
             )
 
     knee_table = pd.read_csv(knee_csv)
-    stab_params = ed.StabilizationParams()
-    omega_cache = {
-        label: ed.combined_omega(trials[label].kin, trials[label].fs, stab_params) for label in TRIALS
-    }
     knee_events = []
     for i, row in enumerate(knee_table.itertuples(), 1):
         loaded = trials[row.trial]
@@ -1346,8 +803,6 @@ def seed_session_from_v1_csvs(trials: dict[str, LoadedTrial]) -> dict:
             stab_end = sec_to_idx(recorded_end, fs, n)
         else:
             peak_idx = sec_to_idx(row.peak_time_s, fs, n)
-            from tai_chi_trunk_and_knee import find_stabilization as find_stabilization_v1
-
             stab_start, stab_end = find_stabilization_v1(loaded.kin, fs, peak_idx)
         knee_events.append(
             {

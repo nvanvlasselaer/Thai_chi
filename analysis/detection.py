@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Motion-driven detection of Tai Chi balance events.
 
-The original detectors in :mod:`tai_chi_trunk_and_knee` score a fixed-width 8 s
+The original detectors (:mod:`analysis.detection_v1`) score a fixed-width 8 s
 sliding window, so every trunk-rotation event comes out exactly 8.000 s long
 regardless of how long the movement actually took, and the stabilization search
 thresholds at the 25th percentile of a local window, which by construction lets
@@ -14,25 +14,38 @@ The detectors here derive the boundaries from the motion instead:
   the trunk starts and stops turning, so the duration is measured rather than
   assumed.  Differentiating also removes the constant yaw drift that this
   6-axis (no magnetometer) dataset suffers from.
+* :func:`find_knee_flexion_windows` marks a monopodal stance wherever the knee
+  flexes past a threshold (60 deg by default) for long enough.
+* :func:`detect_yaw_cycle_segments` cuts the whole form into parts at the
+  neutral crossings of the chest yaw, for the sequence-smoothness family.
 * :func:`find_stabilization` scores candidate quiet windows by how quiet they
   are *relative to the whole recording* and how soon they follow the event, and
   reports a quiet ratio so a window that is not actually quiet can be flagged
   rather than silently used.
 
-Both return the diagnostic signals they thresholded on, so a user interface can
-draw the envelope and the threshold next to the detected band and show *why* a
-boundary landed where it did.
+:func:`pair_trunk_events` then matches the k-th novice rotation to the k-th
+trained one.  The signals the detectors threshold on are exposed
+(:func:`trunk_yaw_envelope`, :func:`combined_omega`, :func:`chest_yaw_signals`),
+so a user interface can draw the envelope and the threshold next to the detected
+band and show *why* a boundary landed where it did.
 """
+
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
-from tai_chi_trunk_and_knee import Kinematics, highpass_detrend, lowpass_signal
+from analysis.kinematics import Kinematics
+from analysis.signals import extract_contiguous_runs, highpass_detrend, lowpass_signal
+
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -122,6 +135,11 @@ class StabilizationParams:
     omega_cutoff_hz: float = 4.0
 
 
+# ---------------------------------------------------------------------------
+# Detected events and diagnostics
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class TrunkEvent:
     """One detected trunk-rotation event, in sample indices."""
@@ -179,6 +197,11 @@ class SegmentDiagnostics:
     pelvis_yaw_deg: np.ndarray
     smoothed_yaw_deg: np.ndarray
     min_lobe_deg: float
+
+
+# ---------------------------------------------------------------------------
+# Trunk rotation
+# ---------------------------------------------------------------------------
 
 
 def trunk_yaw_envelope(
@@ -271,6 +294,60 @@ def detect_trunk_rotation_events(
 
     selected.sort(key=lambda event: event.start)
     return selected, diagnostics
+
+
+def recompute_trunk_peak(
+    kin: Kinematics, fs: float, start: int, end: int, diagnostics: TrunkDiagnostics | None = None
+) -> int:
+    """Locate the yaw peak inside a window, matching the original definition.
+
+    Mirrors the peak in :func:`analysis.detection_v1.detect_novice_trunk_rotation_events`
+    so a manually adjusted window still reports a peak consistent with the rest
+    of the pipeline.
+    """
+    yaw = diagnostics.yaw_deg if diagnostics is not None else trunk_yaw_envelope(kin, fs).yaw_deg
+    segment = yaw[start:end]
+    if len(segment) == 0:
+        return int(start)
+    return int(start + int(np.argmax(np.abs(segment - np.median(segment)))))
+
+
+# ---------------------------------------------------------------------------
+# Monopodal stance
+# ---------------------------------------------------------------------------
+
+
+def find_knee_flexion_windows(
+    knee_angle_deg: np.ndarray,
+    fs: float,
+    threshold_deg: float = 60.0,
+    min_duration_s: float = 0.4,
+    merge_gap_s: float = 0.2,
+) -> tuple[list[tuple[int, int]], np.ndarray]:
+    """Return windows where the knee flexion magnitude exceeds a threshold."""
+    filtered = lowpass_signal(knee_angle_deg, fs, cutoff_hz=6.0)
+    flexion_mag = np.abs(filtered)
+    above = flexion_mag >= threshold_deg
+
+    runs = extract_contiguous_runs(above)
+    min_len = max(1, int(round(min_duration_s * fs)))
+    gap_len = max(1, int(round(merge_gap_s * fs)))
+
+    windows: list[tuple[int, int]] = []
+    for start, end in runs:
+        if end - start < min_len:
+            continue
+        if windows and start - windows[-1][1] <= gap_len:
+            windows[-1] = (windows[-1][0], end)
+        else:
+            windows.append((start, end))
+
+    return windows, flexion_mag
+
+
+# ---------------------------------------------------------------------------
+# Sequence segments
+# ---------------------------------------------------------------------------
 
 
 def chest_yaw_signals(
@@ -380,6 +457,11 @@ def detect_yaw_cycle_segments(
     return segments, diagnostics
 
 
+# ---------------------------------------------------------------------------
+# Stabilization
+# ---------------------------------------------------------------------------
+
+
 def combined_omega(
     kin: Kinematics, fs: float, params: StabilizationParams | None = None
 ) -> StabilizationDiagnostics:
@@ -450,120 +532,9 @@ def find_stabilization(
     return StabilizationResult(start, end, ratio, status)
 
 
-def recompute_trunk_peak(
-    kin: Kinematics, fs: float, start: int, end: int, diagnostics: TrunkDiagnostics | None = None
-) -> int:
-    """Locate the yaw peak inside a window, matching the original definition.
-
-    Mirrors ``detect_novice_trunk_rotation_events`` line 504 so a manually
-    adjusted window still reports a peak consistent with the rest of the
-    pipeline.
-    """
-    yaw = diagnostics.yaw_deg if diagnostics is not None else trunk_yaw_envelope(kin, fs).yaw_deg
-    segment = yaw[start:end]
-    if len(segment) == 0:
-        return int(start)
-    return int(start + int(np.argmax(np.abs(segment - np.median(segment)))))
-
-
-# ----------------------------------------------------------------------------
-# Fast DTW pairing
-#
-# signature_matrix() in the pipeline low-pass filters the full 89 k-sample
-# signal for each of 7 channels on every candidate window, so find_trained_match
-# spends minutes per event re-filtering identical data.  Filtering once up front
-# and slicing afterwards is numerically identical and reduces the cost to the
-# DTW itself.
-# ----------------------------------------------------------------------------
-
-
-SIGNATURE_CUTOFF_HZ = 6.0
-"""Cutoff used by ``resample_filtered_window`` for a 20 Hz target rate."""
-
-
-@dataclass
-class SignatureChannels:
-    """Pre-filtered channels for the DTW signature, in source-rate samples."""
-
-    time_s: np.ndarray
-    channels: list[np.ndarray] = field(default_factory=list)
-
-
-def precompute_signature_channels(kin: Kinematics, fs: float) -> SignatureChannels:
-    """Filter the seven DTW signature channels once, at the source rate.
-
-    The channel list and their order match ``signature_matrix`` exactly.
-    """
-    raw = [
-        highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05),
-        kin.eulers_deg["lumbar"][:, 0],
-        kin.omega_mag["chestbone"],
-        kin.left_knee_deg[:, 0],
-        kin.right_knee_deg[:, 0],
-        kin.omega_mag["lhand"],
-        kin.omega_mag["rhand"],
-    ]
-    return SignatureChannels(
-        time_s=kin.t,
-        channels=[lowpass_signal(channel, fs, cutoff_hz=SIGNATURE_CUTOFF_HZ) for channel in raw],
-    )
-
-
-def signature_matrix(
-    precomputed: SignatureChannels, fs: float, start: int, end: int, target_fs: float = 20.0
-) -> np.ndarray:
-    """Resample the pre-filtered channels over a window and z-score them."""
-    from scipy.stats import zscore
-
-    time = precomputed.time_s
-    n_target = max(2, int(round((end - start) / fs * target_fs)))
-    target_time = time[start] + np.arange(n_target) / target_fs
-    matrix = np.column_stack(
-        [np.interp(target_time, time, channel) for channel in precomputed.channels]
-    )
-    return np.nan_to_num(zscore(matrix, axis=0, nan_policy="omit"))
-
-
-def find_trained_match(
-    novice: SignatureChannels,
-    trained: SignatureChannels,
-    fs: float,
-    novice_start: int,
-    novice_end: int,
-    min_start: int = 0,
-    target_fs: float = 20.0,
-    ignore_s: float = 15.0,
-    step_s: float = 1.0,
-) -> tuple[int, int, float]:
-    """Locate the trained window best matching a novice window, by banded DTW.
-
-    Same search and same distance as the pipeline's ``find_trained_match``, but
-    operating on pre-filtered channels so the low-pass filtering happens once
-    rather than once per candidate window.
-    """
-    from tai_chi_trunk_and_knee import dtw_distance
-
-    template = signature_matrix(novice, fs, novice_start, novice_end, target_fs)
-    window = novice_end - novice_start
-    ignore = int(ignore_s * fs)
-    start_search = max(ignore, min_start)
-    step = max(1, int(step_s * fs))
-    band = int(1.5 * target_fs)
-
-    stop = len(trained.time_s) - window - ignore
-    if start_search >= stop:
-        # No admissible window remains -- the caller's monotonic constraint has
-        # run past the end of the recording.  Report it rather than returning a
-        # silently meaningless window at an infinite distance.
-        return start_search, min(start_search + window, len(trained.time_s) - 1), float("nan")
-
-    best = (start_search, start_search + window, np.inf)
-    for start in range(start_search, stop, step):
-        end = start + window
-        distance = dtw_distance(template, signature_matrix(trained, fs, start, end, target_fs), band=band)
-        if distance < best[2]:
-            best = (start, end, distance)
-    return best
+# ---------------------------------------------------------------------------
+# Pairing novice and trained events
+# ---------------------------------------------------------------------------
 
 
 def pair_trunk_events(
@@ -613,6 +584,11 @@ def pair_trunk_events(
     windows["Novice"] = windows["Novice"][:paired]
     windows["Trained"] = windows["Trained"][:paired]
     return windows, novice_events[:paired], trained_events[:paired]
+
+
+# ---------------------------------------------------------------------------
+# Storing parameter sets
+# ---------------------------------------------------------------------------
 
 
 PARAM_CLASSES = {

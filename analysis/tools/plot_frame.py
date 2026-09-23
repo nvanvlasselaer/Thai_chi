@@ -1,51 +1,25 @@
 #!/usr/bin/env python3
+"""Plot the first frame of the skeleton with each joint's local axis triad.
+
+Used to check sensor alignment:
+
+    python3 analysis/tools/plot_frame.py [npz] [--axis-scale S]
+"""
 import argparse
+import sys
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
-# ----------------------------------------------------------------------
-# Skeleton definition
-# ----------------------------------------------------------------------
-SEGMENTS = {
-    "pelvis_right":   ("pelvis_center", "lumbar",    [ 0.12,  0.0,   0.0 ]),
-    "pelvis_left":    ("pelvis_center", "lumbar",    [-0.12,  0.0,   0.0 ]),
+if __package__ in (None, ""):
+    # Run as a script rather than with -m: make the ``analysis`` package importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-    "spine":          ("pelvis_center", "chestbone", [ 0.0,   0.0,   0.5 ]),
-
-    # rigid extensions (no extra local sensor rotation applied)
-    "shoulder_right": ("spine",         None,        [ 0.18,  0.0,   0.0 ]),
-    "shoulder_left":  ("spine",         None,        [-0.18,  0.0,   0.0 ]),
-
-    "elbow_right":    ("shoulder_right","rhumerus",   [ 0.0,   0.0,  -0.28]),
-    "wrist_right":    ("elbow_right",   "rulna",      [ 0.0,   0.0,  -0.26]),
-    "hand_right":     ("wrist_right",   "rhand",      [ 0.0,   0.0,  -0.10]),
-
-    "elbow_left":     ("shoulder_left", "lhumerus",   [ 0.0,   0.0,  -0.28]),
-    "wrist_left":     ("elbow_left",    "lulna",      [ 0.0,   0.0,  -0.26]),
-    "hand_left":      ("wrist_left",    "lhand",      [ 0.0,   0.0,  -0.10]),
-
-    "knee_right":     ("pelvis_right",  "rthigh",     [ 0.0,   0.0,  -0.42]),
-    "ankle_right":    ("knee_right",    "rtibia",     [ 0.0,   0.0,  -0.40]),
-    "toe_right":      ("ankle_right",   "rfoot",      [ 0.0,   0.18, -0.05]),
-
-    "knee_left":      ("pelvis_left",   "lthigh",     [ 0.0,   0.0,  -0.42]),
-    "ankle_left":     ("knee_left",     "ltibia",     [ 0.0,   0.0,  -0.40]),
-    "toe_left":       ("ankle_left",    "lfoot",      [ 0.0,   0.18, -0.05]),
-}
-
-
-def _verify_topological_order(segments: dict) -> None:
-    seen = {"pelvis_center"}
-    for joint, (parent, _, _) in segments.items():
-        if parent not in seen:
-            raise ValueError(
-                f"Joint '{joint}' references parent '{parent}' before it is defined."
-            )
-        seen.add(joint)
-
-
-_verify_topological_order(SEGMENTS)
+from analysis import config
+from analysis.data_io import load_orientation_npz
+from analysis.tools.skeleton import CONNECTIONS, SEGMENTS
 
 
 # ----------------------------------------------------------------------
@@ -64,16 +38,8 @@ def load_first_frame(npz_path):
         time_s: array
         quats: dict {sensor_name: (4,) wxyz}
     """
-    data = np.load(npz_path)
-    time_s = data["time_s"]
-    quats = {}
-
-    for k in data.files:
-        if k.endswith("_q_wxyz"):
-            sensor = k.replace("_q_wxyz", "")
-            quats[sensor] = data[k][0]  # first frame
-
-    return time_s, quats
+    time_s, quats = load_orientation_npz(npz_path)
+    return time_s, {sensor: q[0] for sensor, q in quats.items()}
 
 
 def compute_positions_and_rotations_first_frame(quats):
@@ -131,26 +97,7 @@ def plot_first_frame(npz_path, axis_scale=0.10):
     time_s, quats = load_first_frame(npz_path)
     positions, rotations = compute_positions_and_rotations_first_frame(quats)
 
-    # Connections for a stick figure
-    connections = [
-        ("pelvis_center", "pelvis_right"),
-        ("pelvis_center", "pelvis_left"),
-        ("pelvis_center", "spine"),
-        ("spine", "shoulder_right"),
-        ("spine", "shoulder_left"),
-        ("shoulder_right", "elbow_right"),
-        ("elbow_right", "wrist_right"),
-        ("wrist_right", "hand_right"),
-        ("shoulder_left", "elbow_left"),
-        ("elbow_left", "wrist_left"),
-        ("wrist_left", "hand_left"),
-        ("pelvis_right", "knee_right"),
-        ("knee_right", "ankle_right"),
-        ("ankle_right", "toe_right"),
-        ("pelvis_left", "knee_left"),
-        ("knee_left", "ankle_left"),
-        ("ankle_left", "toe_left"),
-    ]
+    connections = CONNECTIONS
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection="3d")
@@ -210,7 +157,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "npz_path",
         nargs="?",
-        default="outputs/orientation_novice.npz",
+        default=str(config.OUTPUT_DIR / "orientation_novice.npz"),
         help="Path to orientation .npz file",
     )
     parser.add_argument(

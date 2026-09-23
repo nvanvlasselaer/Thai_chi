@@ -15,8 +15,10 @@ on trust.
 
 Run it with::
 
-    python3 analysis/event_editor.py [--port 8051] [--reseed auto|v1]
-                                     [--recompute-orientation] [--debug]
+    python3 analysis/editor/app.py [--port 8051] [--reseed auto|v1]
+                                   [--recompute-orientation] [--debug]
+
+or, equivalently, ``python3 -m analysis.editor.app``.
 """
 
 from __future__ import annotations
@@ -26,26 +28,31 @@ import sys
 import threading
 from pathlib import Path
 
-# The pipeline binds a matplotlib backend at import time, and the default here
-# is "macosx", which cannot render from a Dash worker thread.  This must run
-# before tai_chi_trunk_and_knee is imported, directly or indirectly.
+# analysis.figures imports pyplot, which binds a matplotlib backend, and the
+# default here is "macosx", which cannot render from a Dash worker thread.  This
+# must run before anything from the analysis package is imported.
 import matplotlib
 
 matplotlib.use("Agg")
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+if __package__ in (None, ""):
+    # Run as a script rather than with -m: make the ``analysis`` package importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import flask
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, Patch, State, ctx, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
-import editor_data as edt
-import event_detection as ed
-import tai_chi_trunk_and_knee as pipeline
+from analysis import config, detection
+from analysis.config import TRIALS
+from analysis.editor import sessions
+from analysis.editor.recompute import recompute
+from analysis.editor.validation import LOW_CONFIDENCE_RATIO, Issue, validate_session
+from analysis.kinematics import LoadedTrial, load_all_trials
+from analysis.signals import lowpass_signal, resample_filtered_full, sec_to_idx
 
 DISPLAY_FS = 50.0
 EVENT_COLOUR = "#f2b134"
@@ -75,19 +82,19 @@ def _series(values: np.ndarray) -> list[float]:
     return np.round(np.asarray(values, dtype=float), 4).tolist()
 
 
-def build_display(loaded: edt.LoadedTrial) -> dict:
+def build_display(loaded: LoadedTrial) -> dict:
     """Resample every plotted channel to 50 Hz once, at startup."""
     kin, fs = loaded.kin, loaded.fs
 
     def resample(signal: np.ndarray) -> np.ndarray:
-        _, values = pipeline.resample_filtered_full(kin.t, signal, fs, DISPLAY_FS)
+        _, values = resample_filtered_full(kin.t, signal, fs, DISPLAY_FS)
         return values
 
-    time_s, _ = pipeline.resample_filtered_full(kin.t, kin.t, fs, DISPLAY_FS)
+    time_s, _ = resample_filtered_full(kin.t, kin.t, fs, DISPLAY_FS)
 
-    trunk_diag = ed.trunk_yaw_envelope(kin, fs)
-    stab_diag = ed.combined_omega(kin, fs)
-    segment_diag = ed.chest_yaw_signals(kin, fs)
+    trunk_diag = detection.trunk_yaw_envelope(kin, fs)
+    stab_diag = detection.combined_omega(kin, fs)
+    segment_diag = detection.chest_yaw_signals(kin, fs)
 
     return {
         "time": _series(time_s),
@@ -101,8 +108,8 @@ def build_display(loaded: edt.LoadedTrial) -> dict:
         "chest_omega": _series(resample(kin.omega_mag["chestbone"])),
         "combined_omega": _series(resample(stab_diag.combined_omega_dps)),
         "omega_baseline": float(stab_diag.baseline_dps),
-        "left_knee": _series(resample(np.abs(pipeline.lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
-        "right_knee": _series(resample(np.abs(pipeline.lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
+        "left_knee": _series(resample(np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
+        "right_knee": _series(resample(np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
         "duration_s": loaded.duration_s,
     }
 
@@ -253,7 +260,7 @@ def build_shapes(session: dict, selection: dict, label: str, fs: float,
 
 
 def all_events(session: dict, family: str) -> list[dict]:
-    return session.get(edt.FAMILY_KEY.get(family, "trunk_events"), [])
+    return session.get(sessions.FAMILY_KEY.get(family, "trunk_events"), [])
 
 
 def find_event(session: dict, selection: dict) -> dict | None:
@@ -321,7 +328,7 @@ EVENT_DETAIL = {
 }
 
 
-def event_table_rows(session: dict, family: str, trials: dict[str, edt.LoadedTrial]) -> list[dict]:
+def event_table_rows(session: dict, family: str, trials: dict[str, LoadedTrial]) -> list[dict]:
     """One row per event, for whichever family the open tab shows.
 
     Every family may now be single-sided -- a stance found in one recording
@@ -362,7 +369,7 @@ def event_flags(event: dict) -> str:
     if any("manual" in (w.get("source") or {}).values() for w in windows):
         flags.append("edited")
     ratios = [w.get("stab_quiet_ratio") for w in windows]
-    if any(r is not None and r > edt.LOW_CONFIDENCE_RATIO for r in ratios):
+    if any(r is not None and r > LOW_CONFIDENCE_RATIO for r in ratios):
         flags.append("unsettled")
     if not event.get("enabled", True):
         flags.append("off")
@@ -374,15 +381,15 @@ def event_flags(event: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
+def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
     displays = {label: build_display(loaded) for label, loaded in trials.items()}
-    figures = {label: base_figure(label, displays[label]) for label in edt.TRIALS}
+    figures = {label: base_figure(label, displays[label]) for label in TRIALS}
 
     app = Dash(__name__, title="Tai Chi event editor")
 
     @app.server.route("/outputs/<path:name>")
     def _serve_output(name: str):
-        return flask.send_from_directory(pipeline.OUTPUT_DIR, name, max_age=0)
+        return flask.send_from_directory(config.OUTPUT_DIR, name, max_age=0)
 
     def number(component_id: str, label_text: str):
         return html.Div([
@@ -398,11 +405,11 @@ def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
                       style={"width": "100%", "fontSize": "12px"}),
         ], style={"marginBottom": "4px"})
 
-    defaults = ed.TrunkDetectorParams()
-    stab_defaults = ed.StabilizationParams()
+    defaults = detection.TrunkDetectorParams()
+    stab_defaults = detection.StabilizationParams()
 
-    knee_defaults = ed.KneeDetectorParams()
-    segment_defaults = ed.SegmentDetectorParams()
+    knee_defaults = detection.KneeDetectorParams()
+    segment_defaults = detection.SegmentDetectorParams()
 
     row_style = {"display": "flex", "gap": "4px", "marginTop": "3px"}
 
@@ -505,7 +512,7 @@ def build_app(trials: dict[str, edt.LoadedTrial], session: dict) -> Dash:
             html.Div("Placed at the centre of the visible time range, then drag to fit.",
                      style={"fontSize": "10px", "color": "#888", "margin": "2px 0 4px"}),
             html.Div([
-                dcc.Dropdown(id="add-trial", options=["Both", *edt.TRIALS], value="Both",
+                dcc.Dropdown(id="add-trial", options=["Both", *TRIALS], value="Both",
                              clearable=False, style={"flex": 1, "fontSize": "11px"}),
                 dcc.Dropdown(id="add-leg", options=["Left", "Right"], value="Left",
                              clearable=False, style={"flex": 1, "fontSize": "11px"}),
@@ -619,7 +626,7 @@ def _first_id(session: dict, family: str) -> str | None:
     return events[0]["event_id"] if events else None
 
 
-def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: dict[str, dict]) -> None:
+def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict[str, dict]) -> None:
     n_samples = {label: loaded.n_samples for label, loaded in trials.items()}
     fs_of = {label: loaded.fs for label, loaded in trials.items()}
 
@@ -778,24 +785,24 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
         def current_detector_params():
             """The settings shown in the panels, which every detector acts on."""
             return (
-                ed.TrunkDetectorParams(
+                detection.TrunkDetectorParams(
                     n_events=int(n_events or 6),
                     rel_threshold=float(rel_thr or 0.15),
                     floor_percentile=float(floor_pct or 40),
                     min_duration_s=float(min_dur or 1.5),
                     min_excursion_deg=float(min_exc or 8.0),
                 ),
-                ed.StabilizationParams(
+                detection.StabilizationParams(
                     latency_weight=float(lam or 0.35),
                     horizon_s=float(horizon or 10.0),
                     min_duration_s=float(stab_dur or 3.0),
                 ),
-                ed.KneeDetectorParams(
+                detection.KneeDetectorParams(
                     threshold_deg=float(knee_thr or 60.0),
                     min_duration_s=float(knee_dur or 0.4),
                     merge_gap_s=float(knee_gap or 0.2),
                 ),
-                ed.SegmentDetectorParams(
+                detection.SegmentDetectorParams(
                     half_cycles=(smooth_unit == "half"),
                     min_lobe_deg=float(smooth_lobe or 10.0),
                     min_lobe_separation_s=float(smooth_sep or 1.5),
@@ -806,7 +813,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             )
 
         if trigger == "btn-new-session":
-            session = edt.start_new_session(trials, *current_detector_params())
+            session = sessions.start_new_session(trials, *current_detector_params())
             session_out = session
             family = selection.get("family", "trunk")
             selection = {"family": family, "event_id": _first_id(session, family)}
@@ -814,12 +821,12 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                 f"New session: {len(session['trunk_events'])} trunk, "
                 f"{len(session['knee_events'])} monopodal-stance and "
                 f"{len(session['smooth_events'])} sequence segments detected at the current "
-                f"settings. The session it replaced is in '{edt.PREVIOUS_SLOT}' — load that to undo."
+                f"settings. The session it replaced is in '{sessions.PREVIOUS_SLOT}' — load that to undo."
             )
 
         elif trigger == "btn-save-session":
             try:
-                path = edt.save_session_as(session, session_name)
+                path = sessions.save_session_as(session, session_name)
             except ValueError as error:
                 message = str(error)
             else:
@@ -833,7 +840,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                 message = "Choose a saved session to load."
             else:
                 try:
-                    session = edt.load_session_named(session_choice, trials)
+                    session = sessions.load_session_named(session_choice, trials)
                 except (FileNotFoundError, ValueError) as error:
                     message = str(error)
                 else:
@@ -846,10 +853,10 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
                               f"{len(session.get('smooth_events', []))} sequence segments")
                     message = (
                         f"Loaded '{loaded_name}': {counts}. "
-                        + (f"'{edt.PREVIOUS_SLOT}' now holds what this replaced, so loading it "
+                        + (f"'{sessions.PREVIOUS_SLOT}' now holds what this replaced, so loading it "
                            "again swaps the two back."
-                           if loaded_name == edt.PREVIOUS_SLOT else
-                           f"The session it replaced is in '{edt.PREVIOUS_SLOT}' — load that to undo.")
+                           if loaded_name == sessions.PREVIOUS_SLOT else
+                           f"The session it replaced is in '{sessions.PREVIOUS_SLOT}' — load that to undo.")
                     )
 
         if trigger == "btn-redetect":
@@ -857,22 +864,22 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             # Re-detect only the family whose tab is open, so the other families'
             # curated windows are never replaced by a click meant for this one.
             if family == "trunk":
-                session["trunk_events"] = edt.seed_session(
+                session["trunk_events"] = sessions.seed_session(
                     trials, trunk_params, stab_params, knee_params, segment_params
                 )["trunk_events"]
                 noun = "trunk-rotation"
             elif family == "knee":
-                session["knee_events"] = edt.seed_knee_events(trials, stab_params, knee_params)
+                session["knee_events"] = sessions.seed_knee_events(trials, stab_params, knee_params)
                 noun = "monopodal-stance"
             else:
-                session["smooth_events"] = edt.seed_smooth_events(trials, segment_params)
+                session["smooth_events"] = sessions.seed_smooth_events(trials, segment_params)
                 noun = "sequence-segment"
             spans = [
                 (w["event_end"] - w["event_start"]) / fs_of[label]
                 for e in all_events(session, family) for label, w in e["windows"].items()
             ]
 
-            session["detector"] = ed.params_to_dict(
+            session["detector"] = detection.params_to_dict(
                 trunk_params, stab_params, knee_params, segment_params
             )
             count = len(all_events(session, family))
@@ -886,30 +893,30 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
 
         if trigger == "btn-add":
             stab_len = float(stab_dur or 3.0)
-            centres = {label: view_centre(view, label) for label in edt.TRIALS}
+            centres = {label: view_centre(view, label) for label in TRIALS}
             if family == "trunk":
-                new = edt.add_trunk_event(session, trials, centres, stab_len_s=stab_len)
+                new = sessions.add_trunk_event(session, trials, centres, stab_len_s=stab_len)
             elif family == "knee":
-                new = edt.add_knee_event(
+                new = sessions.add_knee_event(
                     session, trials, add_trial or "Both", add_leg or "Left",
                     centres, stab_len_s=stab_len,
                 )
             else:
-                new = edt.add_smooth_event(session, trials, add_trial or "Both", centres)
+                new = sessions.add_smooth_event(session, trials, add_trial or "Both", centres)
             where = ", ".join(f"{label} {centres[label]:.1f}s" for label in sorted(new["windows"]))
             session_out = session
             selection = {**selection, "event_id": new["event_id"]}
             message = f"Added {new['event_id']} at {where}. Drag its edges to fit the movement."
 
         elif trigger == "btn-restore":
-            entry = (edt.trash_of(session)[trash_index]
-                     if trash_index is not None and 0 <= trash_index < len(edt.trash_of(session))
+            entry = (sessions.trash_of(session)[trash_index]
+                     if trash_index is not None and 0 <= trash_index < len(sessions.trash_of(session))
                      else None)
             # Read the family from the trash entry: every family now stores its
             # windows the same way, so the shape of the event cannot say which
             # one it came from.
             restored_family = entry.get("family") if entry else None
-            restored = edt.restore_event(session, trash_index, trials) if entry else None
+            restored = sessions.restore_event(session, trash_index, trials) if entry else None
             if restored is None:
                 message = "Select a deleted event to restore."
             else:
@@ -926,7 +933,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             message = f"{event['event_id']} {'enabled' if event['enabled'] else 'disabled'}."
 
         elif event is not None and trigger == "btn-delete":
-            edt.delete_event(session, family, event["event_id"])
+            sessions.delete_event(session, family, event["event_id"])
             message = f"Deleted {event['event_id']}. Restore it from the Deleted events list."
             session_out = session
             selection = {**selection, "event_id": _first_id(session, family)}
@@ -940,8 +947,8 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             fs, n = fs_of[label], n_samples[label]
             changed = False
             for band, (x0, x1) in bands.items():
-                start = edt.sec_to_idx(min(x0, x1), fs, n)
-                end = edt.sec_to_idx(max(x0, x1), fs, n)
+                start = sec_to_idx(min(x0, x1), fs, n)
+                end = sec_to_idx(max(x0, x1), fs, n)
                 changed |= set_boundaries(event, label, band, start, end)
             # Quantising to integer samples means a re-render that echoes the
             # same coordinates back produces no change and stops here, which is
@@ -960,22 +967,22 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             fs, n = fs_of[label], n_samples[label]
             keys = ("event_start", "event_end") if band == "event" else ("stab_start", "stab_end")
             pair = [window[keys[0]], window[keys[1]]]
-            pair[slot] = edt.sec_to_idx(value, fs, n)
+            pair[slot] = sec_to_idx(value, fs, n)
             if not set_boundaries(event, label, band, min(pair), max(pair)):
                 raise PreventUpdate
             session_out = session
 
         if session_out is not no_update:
-            edt.save_session(edt.refresh_seconds(session, trials))
+            sessions.save_session(sessions.refresh_seconds(session, trials))
 
         # --- render -------------------------------------------------------
         detector = session.get("detector") or {}
-        knee_threshold = float(detector.get("knee_threshold_deg", edt.KNEE_THRESHOLD_DEG))
+        knee_threshold = float(detector.get("knee_threshold_deg", sessions.KNEE_THRESHOLD_DEG))
         min_lobe_deg = float(
-            detector.get("smooth_min_lobe_deg", ed.SegmentDetectorParams().min_lobe_deg)
+            detector.get("smooth_min_lobe_deg", detection.SegmentDetectorParams().min_lobe_deg)
         )
         patches = []
-        for label in edt.TRIALS:
+        for label in TRIALS:
             patch = Patch()
             patch["layout"]["shapes"] = build_shapes(
                 session, selection, label, fs_of[label], displays[label],
@@ -984,12 +991,12 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             patches.append(patch)
 
         rows = event_table_rows(session, selection.get("family", "trunk"), trials)
-        banner = render_issues(edt.validate_session(session, trials))
+        banner = render_issues(validate_session(session, trials))
         title = describe_event(event, selection)
 
         trash_options = [
-            {"label": edt.describe_trashed(entry, trials), "value": i}
-            for i, entry in enumerate(edt.trash_of(session))
+            {"label": sessions.describe_trashed(entry, trials), "value": i}
+            for i, entry in enumerate(sessions.trash_of(session))
         ]
         trash_value = None if trigger == "btn-restore" else no_update
 
@@ -1021,7 +1028,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             f"editing: {current_name}" if current_name
             else "editing: working session (unnamed)"
         )
-        session_options = [{"label": n, "value": n} for n in edt.list_sessions()]
+        session_options = [{"label": n, "value": n} for n in sessions.list_sessions()]
 
         return (session_out, *patches, rows, banner, title, message,
                 trash_options, trash_value, add_hint, lock_trial, lock_leg,
@@ -1043,7 +1050,7 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
     def recalculate(_clicks, session, figrev, family):
         try:
             with RECOMPUTE_LOCK:
-                result = edt.recompute(session, trials, write=True)
+                result = recompute(session, trials, write=True)
         except Exception as error:  # surfaced in the UI instead of killing the callback
             return no_update, no_update, no_update, no_update, f"Recalculation failed:\n{error}"
 
@@ -1076,8 +1083,8 @@ def register_callbacks(app: Dash, trials: dict[str, edt.LoadedTrial], displays: 
             f"Novice {trials['Novice'].duration_s:.0f} s / Trained {trials['Trained'].duration_s:.0f} s",
             # Read the live module flag, not the stored one: the header must
             # describe the code about to run, not the code that seeded the file.
-            f"high-pass {'disabled' if pipeline.Ignore_high_pass_filter else 'enabled'}",
-            f"session {edt.SESSION_PATH.name}",
+            f"high-pass {'disabled' if config.IGNORE_HIGH_PASS_FILTER else 'enabled'}",
+            f"session {sessions.SESSION_PATH.name}",
         ]
         return " | ".join(parts)
 
@@ -1096,7 +1103,7 @@ def describe_event(event: dict | None, selection: dict) -> str:
             f"({event['stance_leg']} leg stance)  [{where}]")
 
 
-def render_issues(issues: list[edt.Issue]) -> list:
+def render_issues(issues: list[Issue]) -> list:
     if not issues:
         return [html.Span("No issues.", style={"color": "#2a9d8f"})]
     errors = [i for i in issues if i.severity == "error"]
@@ -1125,25 +1132,25 @@ def main() -> None:
     args = parser.parse_args()
 
     print("Loading recordings ...")
-    trials = edt.load_all_trials(recompute_orientation=args.recompute_orientation)
+    trials = load_all_trials(recompute_orientation=args.recompute_orientation)
     for label, loaded in trials.items():
         print(f"  {label}: {loaded.n_samples} samples at {loaded.fs:.4f} Hz ({loaded.duration_s:.1f} s)")
 
-    session = None if args.reseed else edt.load_session()
+    session = None if args.reseed else sessions.load_session()
     if session is None:
         if args.reseed == "v1":
             print("Seeding from the committed v1 window CSVs ...")
-            session = edt.seed_session_from_v1_csvs(trials)
+            session = sessions.seed_session_from_v1_csvs(trials)
         else:
             print("Detecting events ...")
-            session = edt.seed_session(trials)
-        edt.save_session(edt.refresh_seconds(session, trials))
+            session = sessions.seed_session(trials)
+        sessions.save_session(sessions.refresh_seconds(session, trials))
     else:
-        session, notes = edt.migrate_session(session, trials)
+        session, notes = sessions.migrate_session(session, trials)
         for note in notes:
             print(f"  migrated: {note}")
         if notes:
-            edt.save_session(edt.refresh_seconds(session, trials))
+            sessions.save_session(sessions.refresh_seconds(session, trials))
     print(f"  {len(session['trunk_events'])} trunk events, "
           f"{len(session['knee_events'])} monopodal-stance events, "
           f"{len(session.get('smooth_events', []))} sequence segments")
