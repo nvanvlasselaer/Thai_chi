@@ -14,6 +14,7 @@ A linear scale compresses the low end and makes it hard to visually or statistic
 
 log₁₀ compresses the range symmetrically: each step of +1 corresponds to a ten‑fold increase in jerk.
 
+
 dj = 10 → log₁₀ = 1
 dj = 100 → log₁₀ = 2
 dj = 1000 → log₁₀ = 3
