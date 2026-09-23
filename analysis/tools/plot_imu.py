@@ -1,12 +1,23 @@
+#!/usr/bin/env python3
+"""Dash dashboard for browsing the raw accelerometer and gyroscope channels."""
+import sys
+from pathlib import Path
+
 import pandas as pd
 from dash import Dash, dcc, html, Input, Output
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+if __package__ in (None, ""):
+    # Run as a script rather than with -m: make the ``analysis`` package importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from analysis import config
+
 # ============================================================
 # 1. Load file safely
 # ============================================================
-file_path = "data/IMU_Trial_1_RC_Novice.csv"
+file_path = config.NOVICE_CSV
 
 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
     lines = f.readlines()

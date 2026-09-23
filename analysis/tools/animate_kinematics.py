@@ -1,61 +1,25 @@
+#!/usr/bin/env python3
+"""3D stick-figure animation of a recording from its orientation cache (needs ffmpeg).
+
+    python3 analysis/tools/animate_kinematics.py [npz] [out.mp4] [--start S --end E --fps N]
+"""
 import argparse
+import sys
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from pathlib import Path
 from scipy.spatial.transform import Rotation
 from scipy.signal import butter, sosfiltfilt
 
-# ----------------------------------------------------------------------
-# Skeleton definition
-# ----------------------------------------------------------------------
-SEGMENTS = {
-    # ── Pelvis hips (rigid offsets from pelvis_center; lumbar drives both) ──
-    "pelvis_right":   ("pelvis_center", "lumbar",    [ 0.12,  0,     0   ]),
-    "pelvis_left":    ("pelvis_center", "lumbar",    [-0.12,  0,     0   ]),
+if __package__ in (None, ""):
+    # Run as a script rather than with -m: make the ``analysis`` package importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-    # ── Spine / thorax ──
-    "neck":           ("pelvis_center", "chestbone", [ 0,     0,     0.5 ]),
-
-    # Shoulders are rigid extensions of the thorax; sensor=None means they
-    # inherit the neck's world rotation instead of re-applying chestbone.
-    "shoulder_right": ("neck",          None,        [ 0.18,  0,     0   ]),
-    "shoulder_left":  ("neck",          None,        [-0.18,  0,     0   ]),
-
-    # ── Right arm ──
-    "elbow_right":    ("shoulder_right","rhumerus",  [ 0,     0,    -0.28]),
-    "wrist_right":    ("elbow_right",   "rulna",     [ 0,     0,    -0.26]),
-    "hand_right":     ("wrist_right",   "rhand",     [ 0,     0,    -0.1 ]),
-
-    # ── Left arm ──
-    "elbow_left":     ("shoulder_left", "lhumerus",  [ 0,     0,    -0.28]),
-    "wrist_left":     ("elbow_left",    "lulna",     [ 0,     0,    -0.26]),
-    "hand_left":      ("wrist_left",    "lhand",     [ 0,     0,    -0.1 ]),
-
-    # ── Right leg ──
-    "knee_right":     ("pelvis_right",  "rthigh",    [ 0,     0,    -0.42]),
-    "ankle_right":    ("knee_right",    "rtibia",    [ 0,     0,    -0.4 ]),
-    "toe_right":      ("ankle_right",   "rfoot",     [ 0,     0.18, -0.05]),
-
-    # ── Left leg ──
-    "knee_left":      ("pelvis_left",   "lthigh",    [ 0,     0,    -0.42]),
-    "ankle_left":     ("knee_left",     "ltibia",    [ 0,     0,    -0.4 ]),
-    "toe_left":       ("ankle_left",    "lfoot",     [ 0,     0.18, -0.05]),
-}
-
-
-def _verify_topological_order(segments: dict) -> None:
-    """Raise ValueError if any joint appears before its parent in SEGMENTS."""
-    seen = {"pelvis_center"}
-    for joint, (parent, _, _) in segments.items():
-        if parent not in seen:
-            raise ValueError(
-                f"Joint '{joint}' references parent '{parent}' which has not "
-                f"been defined yet. Fix the ordering in SEGMENTS."
-            )
-        seen.add(joint)
-
-_verify_topological_order(SEGMENTS)
+from analysis import config
+from analysis.data_io import load_orientation_npz
+from analysis.tools.skeleton import CONNECTIONS, SEGMENTS
 
 
 # ----------------------------------------------------------------------
@@ -115,18 +79,12 @@ def load_kinematics(npz_path, filter_hp=False, hp_cutoff=0.05, hp_order=4):
     time_s : (N,) array
     quats : dict {sensor_name: (N,4) array of quaternions in wxyz order}
     """
-    data = np.load(npz_path)
-    time_s = data["time_s"]
+    time_s, quats = load_orientation_npz(npz_path)
 
-    quats = {}
-    for k in data.files:
-        if k.endswith("_q_wxyz"):
-            sensor = k.replace("_q_wxyz", "")
-            q = data[k]   # (N, 4)
-            if filter_hp:
-                print(f"  High‑pass filtering sensor '{sensor}' ...")
-                q = highpass_quat_sos(time_s, q, cutoff=hp_cutoff, order=hp_order)
-            quats[sensor] = q
+    if filter_hp:
+        for sensor, q in quats.items():
+            print(f"  High‑pass filtering sensor '{sensor}' ...")
+            quats[sensor] = highpass_quat_sos(time_s, q, cutoff=hp_cutoff, order=hp_order)
 
     if filter_hp:
         # Warn about possible edge transients
@@ -225,25 +183,7 @@ def create_animation(npz_path, output_path, fps=30, start_time=None, end_time=No
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection='3d')
 
-    connections = [
-        ("pelvis_center",  "pelvis_right"),
-        ("pelvis_center",  "pelvis_left"),
-        ("pelvis_center",  "neck"),
-        ("neck",           "shoulder_right"),
-        ("neck",           "shoulder_left"),
-        ("shoulder_right", "elbow_right"),
-        ("shoulder_left",  "elbow_left"),
-        ("elbow_right",    "wrist_right"),
-        ("elbow_left",     "wrist_left"),
-        ("wrist_right",    "hand_right"),
-        ("wrist_left",     "hand_left"),
-        ("pelvis_right",   "knee_right"),
-        ("pelvis_left",    "knee_left"),
-        ("knee_right",     "ankle_right"),
-        ("knee_left",      "ankle_left"),
-        ("ankle_right",    "toe_right"),
-        ("ankle_left",     "toe_left"),
-    ]
+    connections = CONNECTIONS
 
     lines = []
     for _ in connections:
@@ -333,11 +273,11 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "npz_path", nargs="?", default="outputs/orientation_trained.npz",
+        "npz_path", nargs="?", default=str(config.OUTPUT_DIR / "orientation_trained.npz"),
         help="Path to orientation .npz file"
     )
     parser.add_argument(
-        "output_path", nargs="?", default="outputs/animation_trained.mp4",
+        "output_path", nargs="?", default=str(config.OUTPUT_DIR / "animation_trained.mp4"),
         help="Path to output .mp4 file"
     )
     parser.add_argument("--start", type=float, default=0.0, help="Start time (s)")

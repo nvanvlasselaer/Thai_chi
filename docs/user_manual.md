@@ -2,7 +2,7 @@
 
 A guide to using the interactive event editor: reading the dashboard, adjusting event windows, tuning the detector, and interpreting what comes out.
 
-See [README.md](README.md) for installation.
+See [README.md](../README.md) for installation.
 
 ---
 

@@ -1,9 +1,19 @@
+#!/usr/bin/env python3
+"""Plot the 50 Hz joint-angle series written by the pipeline, in groups."""
+import sys
+from pathlib import Path
+
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
+
+if __package__ in (None, ""):
+    # Run as a script rather than with -m: make the ``analysis`` package importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from analysis import config
 
 # Set the path to your CSV file here
-CSV_PATH = "outputs/kinematic_variables_novice_50hz.csv"  # Change this to your CSV file path
+CSV_PATH = config.OUTPUT_DIR / "kinematic_variables_novice_50hz.csv"
 
 def load_data(filepath):
     """Load the CSV file"""
