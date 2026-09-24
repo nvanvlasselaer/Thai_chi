@@ -15,14 +15,29 @@ Three families are analysed:
   and consistency from one part to the next. Unlike the first two these are not picked out of the
   recording but tile it, and they have no stabilization window.
 
+## Quick start
+
+```bash
+python3 app.py                            # opens the dashboard at http://127.0.0.1:8051
+```
+
+Everything is done from the dashboard. On the **Pipeline** page press **Run pipeline**: it computes
+whatever is missing (about 25 s from scratch). On later starts the recordings load by themselves and
+the stages already done show as done. Check and correct the event windows in the **Event editor**, press **Recalculate**, and read the
+tables and figures on the **Results** page. The two recordings must be in `data/` first — see
+[Data](#data).
+
 ---
 
 ## Data
 
-The recordings are **not** included in this repository (`data/` is git-ignored; the two CSVs are
-~150 MB each). The analysis expects:
+The recordings are **not** included in this repository (`data/` is git-ignored; a recording is
+~150 MB). Put them in `data/`, in subfolders if you like and under any name: every CSV there is
+offered on the Pipeline page, where you choose one for the **novice** role, one for the **trained**
+role, or only one of the two. Files that are not a readable Delsys export are listed but cannot be
+chosen. Until you choose, the two recordings of the original study are selected when present:
 
-| File | Participant |
+| File | Role |
 | --- | --- |
 | `data/IMU_Trial_1_RC_Novice.csv` | Novice |
 | `data/IMU_Trial_3_RC_Trained.csv` | Trained |
@@ -61,63 +76,90 @@ Python 3.13 with:
 > **Note on dash/plotly.** dash 2.14.2 bundles plotly.js 2.23.2, which cannot decode the base64
 > typed arrays that plotly ≥ 6 emits for numpy input. Any figure code in this repository must
 > convert arrays with `.tolist()` before passing them to a trace, or the plot renders blank with no
-> error. `analysis/editor/app.py` routes everything through a `_series()` helper for this reason.
+> error. `analysis/dashboard/editor_page.py` routes everything through a `_series()` helper for this reason.
 
 ---
 
 ## Running the analysis
 
-### Full pipeline
+### The dashboard
 
 ```bash
-python3 analysis/pipeline.py              # or: python3 -m analysis.pipeline
+python3 app.py [--port 8051] [--no-browser] [--debug]
 ```
 
-Parses both recordings, estimates orientations with a 6-axis Madgwick filter, detects the
-trunk-rotation and monopodal-stance events, computes their metrics and writes everything under
-`outputs/`. Takes roughly a minute.
+Starts the server and opens a browser tab. When the orientation cache exists the recordings load in
+the background within a few seconds of starting; until then the editor shows a placeholder. There
+are three pages, each with its own address:
 
-Behaviour is controlled by the switches in `analysis/config.py`, which also holds the data and
-output paths:
+| page | address | what it is for |
+| --- | --- | --- |
+| **Pipeline** | `/pipeline` | status of every stage, and the buttons that run them |
+| **Event editor** | `/editor` | check and correct the windows every metric is computed on |
+| **Results** | `/results` | the metric tables and figures in `outputs/`, and where they came from |
+
+The Pipeline page shows one card per stage, each marked *done*, *out of date* or *not yet*, with
+the button that re-runs it:
+
+| stage | what it does | re-run when |
+| --- | --- | --- |
+| Recordings | choose a novice and a trained recording from the CSVs in `data/`, or leave one empty; **Use these recordings** switches to that selection | you want to analyse other recordings |
+| 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory and orientation validation figure. Done once per recording and reused by every selection it is in | a recording changes (detected from its size and SHA-256) or the orientation code changes |
+| 2 · Recordings loaded | rebuilds the kinematics from the caches (about 5 s) | after stage 1 (automatic) |
+| 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors, the v1 detectors, or the window CSVs in the selection's folder; the session it replaces is kept in its `sessions/_previous.json` | you want to start the curation over |
+| 4 · Metrics and figures | runs the windows through every metric and writes the CSVs and figures to the selection's folder | the windows, settings or recordings changed — the card says so |
+
+**Run pipeline** runs every stage that is missing or out of date, in order. Long work runs in the
+background, with a progress bar, a log, and a status line in the header of every page.
+
+Whether the metrics are up to date is judged from the selection's `metrics_provenance.json`, which
+each recalculation writes: it records a digest of the windows, the metric options, the high-pass
+setting and the recording files it used, and the card compares that digest with the current state.
+
+With one recording selected, everything works the same with one row instead of two: every event has
+one window, the editor shows one graph, and the figures and tables hold that recording alone.
+
+**[docs/user_manual.md](docs/user_manual.md)** covers the event editor in detail: what each plot
+shows, how to adjust the windows, sensible ranges for the detector settings, and how to read the
+results.
+
+Curated boundaries are stored in the selection's `event_editor_session.json`, which records the
+recording files it belongs to, per-boundary provenance (`auto` or `manual`), the detector settings
+used, and the metric options in force. It is the audit trail for every number in the regenerated
+CSVs and is intended to be committed.
+
+**Recalculating overwrites the output CSVs and figures in place.** The previous values remain
+available through git.
+
+### Without the dashboard
+
+The same stages run headless — useful to regenerate every output from the recordings and the
+committed session in one command:
+
+```bash
+python3 -m analysis.pipeline --list                       # the recordings in data/, and their state
+python3 -m analysis.pipeline [--novice FILE] [--trained FILE]
+                             [--force-orientation] [--new-session {v2,v1,csv}] [--workers N]
+```
+
+`FILE` is a path relative to `data/`. Give one of `--novice`/`--trained` to analyse a single
+recording; give neither to reuse the last selection (the one the dashboard has open). The saved
+session is reused unless `--new-session` is given, so this reproduces exactly the outputs the curated
+windows produced. The orientation filter only runs for recordings whose outputs are missing or out of
+date, or for all selected ones with `--force-orientation`.
+
+### Settings
+
+Two switches in `analysis/config.py` change the results, and are shown on the Pipeline page:
 
 | constant | default | meaning |
 | --- | --- | --- |
-| `DETECTOR` | `"v2"` | event-segmentation method — see [Event detection](#event-detection) |
+| `DETECTOR` | `"v2"` | detectors a new session is taken from when none is chosen — see [Event detection](#event-detection) |
 | `IGNORE_HIGH_PASS_FILTER` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
 
-The sampling rate is read from each file's header (370.3704 Hz on every channel).
-
-### Interactive event editor
-
-```bash
-python3 analysis/editor/app.py            # or: python3 -m analysis.editor.app
-                                          # serves at http://127.0.0.1:8051
-```
-
-Automatic segmentation is a starting point, not an answer — see
-[Event detection](#event-detection). The editor plots the kinematics on a zoomable timeline and lets
-each event's four boundaries (movement start/end, stabilization start/end) be dragged into place,
-then recalculates every metric through the pipeline's own functions.
-
-**[docs/user_manual.md](docs/user_manual.md)** covers the dashboard in detail: what each plot shows, how to
-adjust the windows, sensible ranges for the detector settings, and how to read the results.
-
-| flag | effect |
-| --- | --- |
-| `--port N` | serve on a different port (default 8051; `plot_imu.py` uses 8050) |
-| `--reseed auto` | discard the saved session and re-run the detectors |
-| `--reseed v1` | reseed from the committed window CSVs, reproducing the original automatic result |
-| `--recompute-orientation` | re-run the Madgwick filter instead of reusing `outputs/orientation_*.npz` |
-
-Startup takes about 4 s: the orientation quaternions are read from `outputs/orientation_*.npz` and
-all joint angles are rederived from them, rather than re-running the orientation filter.
-
-Curated boundaries are stored in `outputs/event_editor_session.json`, which records per-boundary
-provenance (`auto` or `manual`), the detector settings used, and the metric options in force. It is
-the audit trail for every number in the regenerated CSVs and is intended to be committed.
-
-**Pressing "Recalculate metrics" overwrites the output CSVs and figures in place.** The previous
-values remain available through git.
+`DEFAULT_RECORDINGS` sets what is selected before anything has been chosen; afterwards the choice
+is remembered in `outputs/selection.json` (not tracked by git). The sampling rate is read from each
+file's header.
 
 ### Supporting tools
 
@@ -127,7 +169,7 @@ Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all f
 | command | purpose |
 | --- | --- |
 | `python3 analysis/tools/plot_kinematics.py` | plot the 50 Hz joint-angle series |
-| `python3 analysis/tools/plot_imu.py` | Dash dashboard for browsing raw accelerometer/gyroscope channels |
+| `python3 analysis/tools/plot_imu.py` | separate Dash viewer for the raw accelerometer/gyroscope channels (port 8050) |
 | `python3 analysis/tools/animate_kinematics.py [npz] [out.mp4] [--start S --end E --fps N]` | render a 3D stick-figure animation (requires `ffmpeg`) |
 | `python3 analysis/tools/plot_frame.py [npz] [--axis-scale S]` | plot one skeleton frame with local axis triads, to check sensor alignment |
 | `python3 analysis/tools/yt_download.py` | download the video at the URL in the script from YouTube (requires `yt-dlp`) |
@@ -138,7 +180,7 @@ Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all f
 
 Both event families are segmented automatically, and both are editable afterwards.
 
-### Trunk rotation (`DETECTOR = "v2"`)
+### Trunk rotation (v2)
 
 A trunk rotation begins when the trunk starts turning and ends when it stops, which is a statement
 about angular *velocity*. Peaks in the low-pass-filtered yaw-rate envelope are located, and from each
@@ -150,12 +192,12 @@ Because it operates on a derivative, this segmentation is insensitive to the slo
 to 6-axis orientation estimates.
 
 On the present recordings it yields events of **2.1–7.8 s** (mean 3.7 s). The earlier method
-(`DETECTOR = "v1"`, retained so previously published results remain reproducible) scored a
-**fixed 8 s** sliding window, so every event came out exactly 8.000 s long — roughly twice the
+(v1, retained so previously published results remain reproducible: choose it under **New session**
+on the Pipeline page) scored a **fixed 8 s** sliding window, so every event came out exactly 8.000 s long — roughly twice the
 duration of the actual movement, with the remainder averaging over near-stationary data.
 
 Novice and trained events are paired **by temporal order**, on the premise that both participants
-perform the same form. Dynamic-time-warping matching is implemented but not used by default: events
+perform the same form. Dynamic-time-warping matching, as v1 uses, is not used by v2: events
 of 2–4 s are not distinctive enough for it to match reliably, and because the search is constrained
 to advance monotonically, a single mismatch propagates to every later event. Pairings should be
 checked in the editor.
@@ -267,62 +309,90 @@ The lag window is therefore decoupled from the event window:
 - trunk rotation — the event window padded by 2 s on each side (`lag_pad_s`)
 - monopodal stance — 2 s before to 3 s after peak flexion (`knee_lag_window_s`)
 
-Both are recorded in the session file. Sessions seeded with `--reseed v1` leave them unset and
-reproduce the original behaviour exactly.
+Both are recorded in the session file. Sessions taken from the v1 detectors or from the window CSVs
+leave them unset and reproduce the original behaviour exactly.
 
 ---
 
 ## Outputs
 
-| file | contents |
+Outputs are kept apart by what they depend on, and named after the recordings they came from:
+
+```
+outputs/
+  recordings/<recording>/          one folder per recording, whichever selections use it
+    recording.json                 the source file: name, size, SHA-256; sampling rate, samples, sensors
+    orientation.npz                full-rate quaternions (wxyz) for every sensor, plus time_s
+    kinematic_variables_50hz.csv   all joint angles resampled to 50 Hz (40 columns)
+    sensor_inventory.csv           per-sensor sample counts, duration, sampling rate, missing values
+    orientation_validation.png     lumbar and sternum orientation, for sanity-checking the filter
+  analyses/<selection>/            one folder per selection of recordings
+    analysis.json                  which recordings, by name, size and SHA-256
+    event_editor_session.json      the curated windows and their provenance
+    sessions/                      named copies of the session, and the _previous undo slot
+    metrics_provenance.json        which windows, settings and recordings the metrics came from, and when
+    ... the CSVs and figures below
+```
+
+A recording's folder is its file name with anything unsafe for a file system replaced — with a short
+hash appended when that changed the name, so two files never share a folder. A selection's folder
+names its recordings with their roles, e.g. `novice-IMU_Trial_1_RC_Novice__trained-IMU_Trial_3_RC_Trained`
+or `trained-IMU_Trial_3_RC_Trained`. Every table below has a `recording` column naming the source file
+of each row, and every figure names its source files underneath, so a file copied out of its folder
+still says where it came from.
+
+| file (in the selection's folder) | contents |
 | --- | --- |
-| `sensor_inventory.csv` | per-sensor sample counts, duration, sampling rate, missing values |
-| `orientation_{novice,trained}.npz` | full-rate quaternions (wxyz) for all 14 sensors, plus `time_s` |
-| `kinematic_variables_{novice,trained}_50hz.csv` | all joint angles resampled to 50 Hz (40 columns) |
-| `trunk_rotation_event_windows.csv` | event and stabilization boundaries, per trial |
+| `trunk_rotation_event_windows.csv` | event and stabilization boundaries, per recording |
 | `trunk_rotation_balance_metrics.csv` | trunk-rotation metrics |
 | `monopodal_stance_event_windows.csv` | knee-flexion event boundaries |
 | `monopodal_stance_balance_metrics.csv` | monopodal-stance metrics |
-| `monopodal_stance_asymmetry_metrics.csv` | left/right differences per participant |
-| `event_editor_session.json` | curated boundaries and their provenance |
+| `monopodal_stance_asymmetry_metrics.csv` | left/right differences per recording |
+| `sequence_smoothness_metrics.csv`, `sequence_variability_summary.csv` | sequence-segment metrics, and their spread per recording |
 | `trunk_traceability_figure.png` | trunk-rotation time series with event and stabilization bands, plus metric comparison |
 | `monopodal_stance_overview_figure.png` | knee flexion and trunk response |
-| `monopodal_stance_traceability_figure.png` | monopodal-stance equivalent of the above |
-| `orientation_validation.png` | lumbar and sternum orientation, for sanity-checking the filter |
+| `monopodal_stance_traceability_figure.png` | monopodal-stance equivalent of the trunk figure |
+| `sequence_smoothness_figure.png` | the segments, their waveform corridor and metrics |
 
-Recalculating from the editor rewrites the event-window CSVs, the metric CSVs and the three
-traceability figures. The orientation `.npz`, the 50 Hz kinematic CSVs, `sensor_inventory.csv` and
-`orientation_validation.png` do not depend on event windows and are left untouched.
+Recalculating (stage 4) rewrites the selection's CSVs, figures and `metrics_provenance.json`. Stage 1
+writes the recording folders, which do not depend on event windows.
 
 ---
 
 ## Repository layout
 
-`analysis/` is a Python package whose modules follow the processing chain, one stage each. Every
-module can be imported from a script or notebook (`from analysis.kinematics import load_trial`);
-the entry points can also be run directly as files.
+`app.py` starts the dashboard. Everything else is in `analysis/`, a Python package whose modules
+follow the processing chain, one stage each, with the dashboard on top. Every module can be imported
+from a script or notebook (`from analysis.kinematics import load_trial`).
 
 ```
+app.py                    starts the dashboard
 analysis/
-  config.py               paths, recordings and the analysis-wide switches
+  config.py               paths, default recordings and the analysis-wide switches
   signals.py              filtering, resampling, cross-correlation lag, index/time conversion
   orientation.py          quaternion algebra, Madgwick filter, sensor-mounting alignment
+  recordings.py           the recordings in data/, the selection, and where their outputs go
   data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
   kinematics.py           segment and joint angles; fast loading from the orientation cache
   detection.py            v2 event detection (trunk, stance, segments, stabilization), pairing
-  detection_v1.py         original fixed-window detector and DTW matching (DETECTOR = "v1")
+  detection_v1.py         original fixed-window detector and DTW matching (v1)
   smoothness_metrics.py   smoothness, coordination and consistency per sequence segment
   balance_metrics.py      trunk-rotation and monopodal-stance metrics
   figures.py              all output figures
-  pipeline.py             batch entry point — runs everything and writes outputs/
-  editor/
-    app.py                interactive boundary editor (Dash) — entry point
-    sessions.py           the session file: seeding, editing, named copies, migration
-    validation.py         window checks that gate recalculation
-    recompute.py          curated windows → metrics, CSVs and figures
+  sessions.py             the session file: seeding, editing, named copies, migration
+  validation.py           window checks that gate recalculation
+  recompute.py            windows → metrics, CSVs and figures, and their provenance
+  pipeline.py             the four stages and their status; also runs headless
+  dashboard/
+    app.py                the Dash app: navigation, progress polling, the server
+    pipeline_page.py      stage cards and the buttons that run them
+    editor_page.py        the event-window editor
+    results_page.py       metric tables and figures
+    tasks.py              background jobs, each a sequence of pipeline stages
+    state.py              what the server holds: the loaded recordings and the running job
   tools/                  standalone viewers (see Supporting tools)
-data/                     recordings (not in the repository)
-outputs/                  generated results
+data/                     recordings, any names, subfolders allowed (not in the repository)
+outputs/                  generated results: recordings/<recording>/ and analyses/<selection>/
 docs/
   user_manual.md          guide to using the event editor and interpreting its output
   notes.txt               sensor placement, calibration notes, metric rationale
@@ -332,7 +402,7 @@ docs/
 ```
 
 Each module imports only modules listed above it (type annotations aside), so any stage can be
-used without the ones after it.
+used without the ones after it — nothing outside `dashboard/` depends on Dash.
 
 ---
 

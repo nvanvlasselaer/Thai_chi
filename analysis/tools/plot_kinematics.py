@@ -10,10 +10,12 @@ if __package__ in (None, ""):
     # Run as a script rather than with -m: make the ``analysis`` package importable.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from analysis import config
+from analysis import recordings
 
-# Set the path to your CSV file here
-CSV_PATH = config.OUTPUT_DIR / "kinematic_variables_novice_50hz.csv"
+# The 50 Hz export of the selected novice recording (else the trained one);
+# set a path here to plot another.
+_recording = recordings.selected_recording("Novice")
+CSV_PATH = _recording.kinematics_path if _recording else None
 
 def load_data(filepath):
     """Load the CSV file"""

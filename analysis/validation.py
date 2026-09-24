@@ -14,8 +14,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from analysis.config import TRIALS
-from analysis.editor.sessions import FAMILIES, FAMILY_KEY
 from analysis.kinematics import LoadedTrial
+from analysis.sessions import FAMILIES, FAMILY_KEY
 
 
 MIN_EVENT_S = 0.2
@@ -103,7 +103,7 @@ def check_segment_continuity(events: list[dict], trials: dict[str, LoadedTrial])
     form leaves a legitimate gap, so this warns rather than errors.
     """
     issues: list[Issue] = []
-    for label in TRIALS:
+    for label in (label for label in TRIALS if label in trials):
         fs = trials[label].fs
         spans = [
             (event["event_id"], event["windows"][label])
@@ -137,7 +137,7 @@ def check_pairing(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Is
     offsets = {}
     for event in events:
         windows = event.get("windows", {})
-        if not all(label in windows for label in TRIALS):
+        if not all(label in windows and label in trials for label in TRIALS):
             continue
         offsets[event["event_id"]] = (
             windows["Novice"]["event_start"] / trials["Novice"].fs
@@ -162,6 +162,10 @@ def validate_session(session: dict, trials: dict[str, LoadedTrial]) -> list[Issu
         enabled = [e for e in session.get(FAMILY_KEY[family], []) if e.get("enabled", True)]
         for event in enabled:
             for label, window in event.get("windows", {}).items():
+                if label not in trials:
+                    issues.append(Issue(event["event_id"], label, "error",
+                                        f"has a window for the {label.lower()} recording, which is not selected"))
+                    continue
                 loaded = trials[label]
                 issues += validate_window(
                     event["event_id"], label, window, loaded.fs, loaded.n_samples

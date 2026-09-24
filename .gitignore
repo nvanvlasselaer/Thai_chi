@@ -8,5 +8,7 @@ __pycache__/
 .DS_Store
 
 # Interrupted atomic session writes
-outputs/*.tmp
-outputs/sessions/*.tmp
+outputs/**/*.tmp
+
+# Which recordings the dashboard last had selected (per user)
+outputs/selection.json

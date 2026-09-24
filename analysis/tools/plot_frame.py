@@ -17,7 +17,7 @@ if __package__ in (None, ""):
     # Run as a script rather than with -m: make the ``analysis`` package importable.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from analysis import config
+from analysis import recordings
 from analysis.data_io import load_orientation_npz
 from analysis.tools.skeleton import CONNECTIONS, SEGMENTS
 
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "npz_path",
         nargs="?",
-        default=str(config.OUTPUT_DIR / "orientation_novice.npz"),
+        default=str(recordings.selected_recording("Novice").orientation_path),
         help="Path to orientation .npz file",
     )
     parser.add_argument(

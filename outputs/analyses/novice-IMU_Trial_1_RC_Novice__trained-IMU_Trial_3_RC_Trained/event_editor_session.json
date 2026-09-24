@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "created_utc": "2026-09-21T21:24:51+00:00",
-  "modified_utc": "2026-09-22T02:22:46+00:00",
+  "modified_utc": "2026-09-23T22:55:52+00:00",
   "fs": {
     "Novice": 370.3704,
     "Trained": 370.3704
@@ -25,19 +25,19 @@
     "knee_threshold_deg": 60,
     "knee_min_duration_s": 0.4,
     "knee_merge_gap_s": 0.2,
-    "smooth_half_cycles": false,
-    "smooth_yaw_cutoff_hz": 0.5,
-    "smooth_min_lobe_deg": 8,
-    "smooth_min_lobe_separation_s": 1,
-    "smooth_min_excursion_deg": 10,
-    "smooth_min_duration_s": 1,
-    "smooth_max_duration_s": 25,
     "stab_min_duration_s": 3,
     "stab_horizon_s": 10,
     "stab_latency_weight": 0.35,
     "stab_baseline_percentile": 20,
     "stab_low_confidence_ratio": 1.6,
-    "stab_omega_cutoff_hz": 4
+    "stab_omega_cutoff_hz": 4,
+    "smooth_half_cycles": false,
+    "smooth_yaw_cutoff_hz": 0.5,
+    "smooth_min_lobe_deg": 10,
+    "smooth_min_lobe_separation_s": 1.5,
+    "smooth_min_excursion_deg": 10,
+    "smooth_min_duration_s": 2,
+    "smooth_max_duration_s": 20
   },
   "lag_pad_s": 2,
   "knee_lag_window_s": [
@@ -777,119 +777,6 @@
           }
         }
       }
-    },
-    {
-      "family": "smooth",
-      "deleted_utc": "2026-09-22T02:22:10+00:00",
-      "event": {
-        "event_id": "smooth-09",
-        "enabled": true,
-        "windows": {
-          "Novice": {
-            "event_start": 44375,
-            "event_end": 46854,
-            "event_start_s": 119.8125,
-            "event_end_s": 126.5058,
-            "source": {
-              "event": "auto"
-            }
-          },
-          "Trained": {
-            "event_start": 56017,
-            "event_end": 62120,
-            "event_start_s": 151.2459,
-            "event_end_s": 167.724,
-            "source": {
-              "event": "auto"
-            }
-          }
-        }
-      }
-    },
-    {
-      "family": "smooth",
-      "deleted_utc": "2026-09-22T02:22:19+00:00",
-      "event": {
-        "event_id": "smooth-11",
-        "enabled": true,
-        "windows": {
-          "Novice": {
-            "event_start": 54703,
-            "event_end": 58627,
-            "event_start_s": 147.6981,
-            "event_end_s": 158.2929,
-            "source": {
-              "event": "auto"
-            }
-          },
-          "Trained": {
-            "event_start": 67427,
-            "event_end": 69664,
-            "event_start_s": 182.0529,
-            "event_end_s": 188.0928,
-            "source": {
-              "event": "auto"
-            }
-          }
-        }
-      }
-    },
-    {
-      "family": "smooth",
-      "deleted_utc": "2026-09-22T02:22:26+00:00",
-      "event": {
-        "event_id": "smooth-14",
-        "enabled": true,
-        "windows": {
-          "Novice": {
-            "event_start": 69843,
-            "event_end": 72838,
-            "event_start_s": 188.5761,
-            "event_end_s": 196.6626,
-            "source": {
-              "event": "auto"
-            }
-          }
-        }
-      }
-    },
-    {
-      "family": "smooth",
-      "deleted_utc": "2026-09-22T02:22:32+00:00",
-      "event": {
-        "event_id": "smooth-16",
-        "enabled": true,
-        "windows": {
-          "Novice": {
-            "event_start": 77529,
-            "event_end": 79347,
-            "event_start_s": 209.3283,
-            "event_end_s": 214.2369,
-            "source": {
-              "event": "auto"
-            }
-          }
-        }
-      }
-    },
-    {
-      "family": "smooth",
-      "deleted_utc": "2026-09-22T02:22:34+00:00",
-      "event": {
-        "event_id": "smooth-15",
-        "enabled": true,
-        "windows": {
-          "Novice": {
-            "event_start": 72838,
-            "event_end": 77529,
-            "event_start_s": 196.6626,
-            "event_end_s": 209.3283,
-            "source": {
-              "event": "auto"
-            }
-          }
-        }
-      }
     }
   ],
   "smooth_events": [
@@ -907,12 +794,12 @@
           }
         },
         "Trained": {
-          "event_start": 9154,
-          "event_end": 14950,
-          "event_start_s": 24.7158,
-          "event_end_s": 40.365,
+          "event_start": 12128,
+          "event_end": 18005,
+          "event_start_s": 32.7456,
+          "event_end_s": 48.6135,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         }
       }
@@ -931,12 +818,12 @@
           }
         },
         "Trained": {
-          "event_start": 17040,
+          "event_start": 18005,
           "event_end": 24029,
-          "event_start_s": 46.008,
+          "event_start_s": 48.6135,
           "event_end_s": 64.8783,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         }
       }
@@ -956,11 +843,11 @@
         },
         "Trained": {
           "event_start": 24029,
-          "event_end": 29431,
+          "event_end": 26215,
           "event_start_s": 64.8783,
-          "event_end_s": 79.4637,
+          "event_end_s": 70.7805,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         }
       }
@@ -979,12 +866,12 @@
           }
         },
         "Trained": {
-          "event_start": 29431,
+          "event_start": 26215,
           "event_end": 31877,
-          "event_start_s": 79.4637,
+          "event_start_s": 70.7805,
           "event_end_s": 86.0679,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         }
       }
@@ -995,11 +882,11 @@
       "windows": {
         "Novice": {
           "event_start": 29551,
-          "event_end": 33136,
+          "event_end": 35218,
           "event_start_s": 79.7877,
-          "event_end_s": 89.4672,
+          "event_end_s": 95.0886,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         },
         "Trained": {
@@ -1018,12 +905,12 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 33200,
-          "event_end": 36605,
-          "event_start_s": 89.64,
-          "event_end_s": 98.8335,
+          "event_start": 35218,
+          "event_end": 37974,
+          "event_start_s": 95.0886,
+          "event_end_s": 102.5298,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         },
         "Trained": {
@@ -1042,12 +929,12 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 36605,
-          "event_end": 39605,
-          "event_start_s": 98.8335,
-          "event_end_s": 106.9335,
+          "event_start": 37974,
+          "event_end": 41119,
+          "event_start_s": 102.5298,
+          "event_end_s": 111.0213,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         },
         "Trained": {
@@ -1066,12 +953,12 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 42704,
-          "event_end": 46754,
-          "event_start_s": 115.3008,
-          "event_end_s": 126.2358,
+          "event_start": 41119,
+          "event_end": 44375,
+          "event_start_s": 111.0213,
+          "event_end_s": 119.8125,
           "source": {
-            "event": "manual"
+            "event": "auto"
           }
         },
         "Trained": {
@@ -1086,14 +973,38 @@
       }
     },
     {
+      "event_id": "smooth-09",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 44375,
+          "event_end": 46854,
+          "event_start_s": 119.8125,
+          "event_end_s": 126.5058,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 56017,
+          "event_end": 62120,
+          "event_start_s": 151.2459,
+          "event_end_s": 167.724,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
       "event_id": "smooth-10",
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 46854,
-          "event_end": 54703,
-          "event_start_s": 126.5058,
-          "event_end_s": 147.6981,
+          "event_start": 58627,
+          "event_end": 65153,
+          "event_start_s": 158.2929,
+          "event_end_s": 175.9131,
           "source": {
             "event": "auto"
           }
@@ -1110,14 +1021,38 @@
       }
     },
     {
+      "event_id": "smooth-11",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 65153,
+          "event_end": 69843,
+          "event_start_s": 175.9131,
+          "event_end_s": 188.5761,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 67427,
+          "event_end": 69664,
+          "event_start_s": 182.0529,
+          "event_end_s": 188.0928,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
       "event_id": "smooth-12",
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 58627,
-          "event_end": 65153,
-          "event_start_s": 158.2929,
-          "event_end_s": 175.9131,
+          "event_start": 69843,
+          "event_end": 72838,
+          "event_start_s": 188.5761,
+          "event_end_s": 196.6626,
           "source": {
             "event": "auto"
           }
@@ -1138,10 +1073,10 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 65153,
-          "event_end": 69843,
-          "event_start_s": 175.9131,
-          "event_end_s": 188.5761,
+          "event_start": 72838,
+          "event_end": 77529,
+          "event_start_s": 196.6626,
+          "event_end_s": 209.3283,
           "source": {
             "event": "auto"
           }

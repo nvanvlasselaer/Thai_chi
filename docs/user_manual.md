@@ -1,8 +1,50 @@
-# Event editor — user manual
+# Dashboard — user manual
 
-A guide to using the interactive event editor: reading the dashboard, adjusting event windows, tuning the detector, and interpreting what comes out.
+A guide to the dashboard the analysis is run from: running the pipeline, reading the event editor, adjusting event windows, tuning the detector, and interpreting what comes out.
 
 See [README.md](../README.md) for installation.
+
+---
+
+## Getting started
+
+Start the app from the repository root:
+
+```bash
+python3 app.py
+```
+
+A browser tab opens at http://127.0.0.1:8051. The header has three pages — **Pipeline**, **Event editor** and **Results** — and on the right a status line for whatever is running in the background. Each page has its own address (`/pipeline`, `/editor`, `/results`), so a refresh stays where you are.
+
+### The Pipeline page
+
+This is where the analysis starts. Each stage has a card saying whether it is **done**, **out of date** or **not yet** done, with the button that runs it again:
+
+| card | what it does |
+| --- | --- |
+| Recordings | which recordings to analyse — see [Choosing recordings](#choosing-recordings) below |
+| 1 · Orientation and kinematics | runs the orientation filter on every sensor of each selected recording and writes its orientation cache, 50 Hz joint angles, sensor inventory and orientation validation figure. About 10 s per recording, done once: every selection that uses the recording reuses it, until the file itself changes |
+| 2 · Recordings loaded | loads the selected recordings into the app, for the editor. A few seconds, and it happens by itself when the server starts once stage 1 has been run |
+| 3 · Event windows | the session you edit in the event editor — one per selection. **New session** starts over from the source chosen beside it — the v2 detectors, the v1 detectors (fixed 8 s windows, to reproduce earlier results) or the selection's window CSVs — and keeps the session it replaces in `_previous` (see [§4](#saving-and-loading-sessions)) |
+| 4 · Metrics and figures | recalculates everything from the session. The card says **out of date** as soon as a window, a setting or a recording file has changed since the last recalculation |
+
+**Run pipeline** does whatever is missing or out of date, in order. On a fresh copy of the repository that is all of it, about 25 s; after that it usually only recalculates. While a job runs, a progress bar and a log appear under the cards and the buttons are greyed out until it finishes. A job keeps running if you switch page, and the page you are on picks up its result when it finishes: a new session appears in the editor without reloading.
+
+### Choosing recordings
+
+Every CSV in `data/` — subfolders included, under any name — appears in the two dropdowns of the Recordings card, one for the **novice** role and one for the **trained** role, each marked *processed*, *not processed yet* or *preprocess again*. A file that is not a readable Delsys export is listed but greyed out, with the reason.
+
+Pick a recording for each role, or clear one (×) to analyse a single recording, and press **Use these recordings**. The line underneath says which folder the selection's outputs go to — `outputs/analyses/novice-<recording>__trained-<recording>/`, or `novice-<recording>` alone — and whether that analysis already exists. Switching is instant when the recordings have been processed before; otherwise the cards show what is missing and **Run pipeline** processes only the new recordings.
+
+Each selection keeps its own session, named sessions, metrics and figures, so switching back later returns to the curation exactly as you left it. With one recording selected, the editor shows one graph and every event has one window; the tables and figures hold that recording alone.
+
+Every output says where it came from: the folder is named after the recordings, `analysis.json` and each recording's `recording.json` record the exact file (name, size, SHA-256), every table has a `recording` column, and every figure names its files underneath.
+
+### The Results page
+
+Shows the metric tables — pick one with the buttons above the table; every column sorts — and every figure, each opening full size when clicked. The line at the top says which session the numbers were computed from and whether they still match it.
+
+Everything on this page is read back from `outputs/`, so it is exactly what someone opening that folder would see.
 
 ---
 
@@ -24,9 +66,10 @@ The software places both windows automatically, and gets most of them approximat
 ## 2. The screen at a glance
 
 ```
+ Tai Chi balance analysis   Pipeline  [Event editor]  Results      ● status
 ┌────────────────────┬───────────────────────────────────────────────────────┐
-│ SESSION            │  Tai Chi event editor                                 │
-│  [saved ▾] [Load]  │  fs 370.37 Hz | Novice 241 s / Trained 236 s | ...    │
+│ SESSION            │  fs 370.37 Hz | Novice 241 s / Trained 236 s | ...    │
+│  [saved ▾] [Load]  │                                                       │
 │  [name___] [Save]  ├───────────────────────────────────────────────────────┤
 │  [New session]     │                                                       │
 │ DETECTOR — <tab>   │  [ Trunk rotation ] [ Monopodal stance ]              │
@@ -136,7 +179,7 @@ If you enter a start later than its end, the editor swaps them rather than creat
   are drawn faintly.
 - **Delete** — moves the event to the *Deleted events* list. It is not lost; see below.
 
-All changes save immediately to `outputs/event_editor_session.json`. There is no separate save step,
+All changes save immediately to the selection's `event_editor_session.json` (in `outputs/analyses/<selection>/`). There is no separate save step,
 and your work survives restarting the app.
 
 ### Adding an event the detector missed
@@ -170,12 +213,14 @@ the same recordings — a conservative segmentation and a permissive one, say �
 instead of overwriting one with the other.
 
 - **Save** — type a name and press it. The name is tidied into a filename (`tight windows` becomes
-  `tight-windows`), the copy is written to `outputs/sessions/`, and that name becomes the one you
+  `tight-windows`), the copy is written to the selection's `sessions/` folder, and that name becomes the one you
   are editing. Saving again under the same name overwrites that copy.
 - **Load** — pick from the dropdown. The session replaces everything on screen: events, deleted
   events and detector settings.
-- **New session from detection** — throws the current curation away and re-detects both families
-  from scratch, using the settings currently in the detector panels. The deleted-events list is
+- **New session from detection** — throws the current curation away and re-detects all three families
+  from scratch, using the settings currently in the detector panels. (The **New session** button on
+  the Pipeline page does the same from the default settings, and can also start from the v1
+  detectors or from the window CSVs in `outputs/`.) The deleted-events list is
   emptied and the session becomes unnamed again. Use it to start over, or to see what the detector
   makes of a new set of thresholds without a half-edited session in the way.
 
@@ -186,7 +231,7 @@ deleted list alone, whereas New resets everything.
 you deliberately reload the session you are already on to throw away unsaved edits. Only one step of
 undo is kept, so the next load overwrites it.
 
-Named sessions live in `outputs/sessions/` as readable JSON and are tracked by git, so a curation can
+Named sessions live in the selection's `sessions/` folder as readable JSON and are tracked by git, so a curation can
 be committed as the provenance for whatever numbers you publish from it.
 
 ### Restoring a deleted event
@@ -288,7 +333,7 @@ Sequence segments have no stabilization window, so this panel is hidden on the *
 
 ## 7. Recalculating and interpreting the results
 
-Press **Recalculate metrics**. It validates the windows, recomputes everything, rewrites the result CSVs and regenerates the three figures, which appear below the table. 
+Press **Recalculate metrics** — here, or **Recalculate** on the Pipeline page. It validates the windows, recomputes everything, rewrites the result CSVs and regenerates the four traceability figures, which appear below the table. Every table and figure is also on the **Results** page, and the Pipeline page's metrics card turns **done**.
 
 **This overwrites the result files in place.** The previous values remain in git.
 
@@ -363,6 +408,8 @@ window, the person is genuinely still turning; that is not drift. Whole-recordin
 
 ## 9. A working routine
 
+0. Start the app (`python3 app.py`). If any Pipeline card is not **done**, press **Run pipeline**
+   and wait for it; then open the **Event editor**.
 1. Open the **Trunk rotation** tab. Work down the event list in order.
 2. For each event, zoom to it and check **row 2**: does the amber band start where the yaw speed
    rises and end where it settles? Drag the edges if not.
@@ -380,6 +427,8 @@ window, the person is genuinely still turning; that is not drift. Whole-recordin
    recalculated regardless.
 9. Read the log. Discard any lag reported at ±1.998 s.
 10. Check the regenerated figures below the table — the bands drawn there should match what you set.
+11. Read the numbers on the **Results** page. Commit `outputs/` together with the session file, so
+    every number stays traceable to the windows it came from.
 
 If the detector is systematically placing windows too wide or too narrow across many events, that is
 a signal to adjust the **onset threshold** and re-detect rather than to correct twelve windows by
@@ -470,6 +519,6 @@ difference between the two people is not a training effect.
 
 ---
 
-The session file `outputs/event_editor_session.json` is plain, readable JSON holding every boundary
+The session file `outputs/analyses/<selection>/event_editor_session.json` is plain, readable JSON holding every boundary
 in sample indices and seconds, with a note of whether each was set automatically or by hand. If the
 interface ever disagrees with what you expect, that file is the authority.
