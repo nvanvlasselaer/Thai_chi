@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
-"""Interactive editor for Tai Chi balance-event windows.
+"""The event editor page: check and correct the windows every metric is computed on.
 
 Automatic detection gets most events roughly right and some badly wrong, and
 every variability metric is computed *on* those windows, so a bad window
-silently produces a bad number.  This app plots the kinematics on a scrollable,
-zoomable timeline, lets the boundaries be dragged into place, and recalculates
-the metrics through the pipeline's own functions.
+silently produces a bad number.  This page plots the kinematics on a
+scrollable, zoomable timeline, lets the boundaries be dragged into place, and
+recalculates the metrics through the pipeline's own functions.
 
 Four boundaries per event are editable: the start and end of the movement, and
 the start and end of the stabilization period that follows it.  The subplot
@@ -13,46 +12,27 @@ showing the yaw-velocity envelope also draws the threshold the detector used, so
 a boundary can be judged against the signal that produced it rather than taken
 on trust.
 
-Run it with::
-
-    python3 analysis/editor/app.py [--port 8051] [--reseed auto|v1]
-                                   [--recompute-orientation] [--debug]
-
-or, equivalently, ``python3 -m analysis.editor.app``.
+The recordings come from the shared workspace (:mod:`analysis.dashboard.state`),
+which the Pipeline page loads; until it has, the page shows a placeholder.  With
+only one recording selected, only its graph is shown and every event has one
+window.  Every edit is written to the session file straight away.
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
-import threading
-from pathlib import Path
-
-# analysis.figures imports pyplot, which binds a matplotlib backend, and the
-# default here is "macosx", which cannot render from a Dash worker thread.  This
-# must run before anything from the analysis package is imported.
-import matplotlib
-
-matplotlib.use("Agg")
-
-if __package__ in (None, ""):
-    # Run as a script rather than with -m: make the ``analysis`` package importable.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import flask
 import numpy as np
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, Patch, State, ctx, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
-from analysis import config, detection
+from analysis import config, detection, recordings, sessions
 from analysis.config import TRIALS
-from analysis.editor import sessions
-from analysis.editor.recompute import recompute
-from analysis.editor.validation import LOW_CONFIDENCE_RATIO, Issue, validate_session
-from analysis.kinematics import LoadedTrial, load_all_trials
+from analysis.dashboard.state import WORK_LOCK, workspace
+from analysis.kinematics import LoadedTrial
+from analysis.recompute import recompute
 from analysis.signals import lowpass_signal, resample_filtered_full, sec_to_idx
+from analysis.validation import LOW_CONFIDENCE_RATIO, Issue, validate_session
 
 DISPLAY_FS = 50.0
 EVENT_COLOUR = "#f2b134"
@@ -66,7 +46,27 @@ ROW_TITLES = [
     "chest and pelvis yaw (deg)  -  dashed: minimum turn for a sequence segment",
 ]
 N_ROWS = len(ROW_TITLES)
-RECOMPUTE_LOCK = threading.Lock()
+HIDDEN = {"display": "none"}
+BODY_STYLE = {"display": "flex", "height": "100%"}
+EMPTY_STYLE = {"padding": "40px"}
+SHOWN = {"display": "block"}
+
+
+def loaded_roles() -> list[str]:
+    trials = workspace.trials or {}
+    return [label for label in TRIALS if label in trials]
+
+
+def graph_title(label: str) -> str:
+    trials = workspace.trials or {}
+    return f"{label}: {trials[label].recording.name}" if label in trials else label
+
+
+def add_trial_options(labels: list[str]) -> tuple[list[str], str | None]:
+    """Where a new event can be placed: both recordings, or one of them."""
+    if len(labels) < 2:
+        return labels, (labels[0] if labels else None)
+    return ["Both", *labels], "Both"
 
 
 # ---------------------------------------------------------------------------
@@ -377,32 +377,35 @@ def event_flags(event: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# App
+# Page layout
 # ---------------------------------------------------------------------------
 
 
-def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
-    displays = {label: build_display(loaded) for label, loaded in trials.items()}
-    figures = {label: base_figure(label, displays[label]) for label in TRIALS}
+def layout() -> html.Div:
+    """The editor page, filled from the workspace if the recordings are loaded.
 
-    app = Dash(__name__, title="Tai Chi event editor")
-
-    @app.server.route("/outputs/<path:name>")
-    def _serve_output(name: str):
-        return flask.send_from_directory(config.OUTPUT_DIR, name, max_age=0)
+    Built on every page load, so refreshing the browser always shows the
+    session as it is saved on disk.
+    """
+    ready = workspace.ready
+    displays = workspace.displays if ready else None
+    session = sessions.load_session() if ready else None
+    present = loaded_roles()
+    figures = {label: base_figure(label, displays[label]) if label in present else {} for label in TRIALS}
+    add_options, add_value = add_trial_options(present)
 
     def number(component_id: str, label_text: str):
         return html.Div([
             html.Label(label_text, style={"fontSize": "11px", "color": "#555"}),
             dcc.Input(id=component_id, type="number", step=0.05, debounce=True,
-                      style={"width": "100%", "fontSize": "12px"}),
+                      style={"width": "100%", "fontSize": "12px", "boxSizing": "border-box"}),
         ], style={"marginBottom": "4px"})
 
     def detector_input(component_id: str, label_text: str, value, step):
         return html.Div([
             html.Label(label_text, style={"fontSize": "11px", "color": "#555"}),
             dcc.Input(id=component_id, type="number", value=value, step=step, debounce=True,
-                      style={"width": "100%", "fontSize": "12px"}),
+                      style={"width": "100%", "fontSize": "12px", "boxSizing": "border-box"}),
         ], style={"marginBottom": "4px"})
 
     defaults = detection.TrunkDetectorParams()
@@ -496,6 +499,7 @@ def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
             selected_rows=[0],
             page_size=14,
             style_cell={"fontSize": "11px", "padding": "3px", "textAlign": "left"},
+            style_table={"overflowX": "auto"},
             style_header={"fontWeight": "bold", "backgroundColor": "#f0f0f0"},
             style_data_conditional=[
                 {"if": {"filter_query": '{flags} contains "unsettled"'}, "backgroundColor": "#fff4e0"},
@@ -512,7 +516,7 @@ def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
             html.Div("Placed at the centre of the visible time range, then drag to fit.",
                      style={"fontSize": "10px", "color": "#888", "margin": "2px 0 4px"}),
             html.Div([
-                dcc.Dropdown(id="add-trial", options=["Both", *TRIALS], value="Both",
+                dcc.Dropdown(id="add-trial", options=add_options, value=add_value,
                              clearable=False, style={"flex": 1, "fontSize": "11px"}),
                 dcc.Dropdown(id="add-leg", options=["Left", "Right"], value="Left",
                              clearable=False, style={"flex": 1, "fontSize": "11px"}),
@@ -558,14 +562,12 @@ def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
                     style={"width": "100%", "marginTop": "8px", "padding": "8px",
                            "fontWeight": "bold", "backgroundColor": "#2a9d8f", "color": "white",
                            "border": "none", "cursor": "pointer"}),
-    ], style={"width": "330px", "padding": "10px", "overflowY": "auto", "height": "100vh",
+    ], style={"width": "330px", "padding": "10px", "overflowY": "auto", "height": "100%",
               "borderRight": "1px solid #ddd", "boxSizing": "border-box"})
 
     main = html.Div([
-        html.Div([
-            html.H3("Tai Chi event editor", style={"margin": "0 0 2px 0"}),
-            html.Div(id="header-meta", style={"fontSize": "11px", "color": "#666"}),
-        ], style={"padding": "8px 12px", "borderBottom": "1px solid #ddd"}),
+        html.Div(header_text(), id="header-meta",
+                 style={"fontSize": "11px", "color": "#666", "padding": "6px 12px", "borderBottom": "1px solid #ddd"}),
 
         dcc.Tabs(id="family-tabs", value="trunk", children=[
             dcc.Tab(label="Trunk rotation", value="trunk"),
@@ -576,14 +578,13 @@ def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
         html.Div(id="validation", style={"fontSize": "11px", "padding": "6px 12px"}),
 
         html.Div([
-            html.Div([
-                html.Div("Novice", style={"fontWeight": "bold", "fontSize": "12px", "padding": "4px 12px"}),
-                dcc.Graph(id="graph-Novice", figure=figures["Novice"], config=GRAPH_CONFIG),
-            ]),
-            html.Div([
-                html.Div("Trained", style={"fontWeight": "bold", "fontSize": "12px", "padding": "4px 12px"}),
-                dcc.Graph(id="graph-Trained", figure=figures["Trained"], config=GRAPH_CONFIG),
-            ]),
+            # Both graphs are always in the page, since the callbacks name them;
+            # a role with no recording selected is hidden.
+            *[html.Div([
+                html.Div(graph_title(label), id=f"graph-title-{label}",
+                         style={"fontWeight": "bold", "fontSize": "12px", "padding": "4px 12px"}),
+                dcc.Graph(id=f"graph-{label}", figure=figures[label], config=GRAPH_CONFIG),
+            ], id=f"graph-section-{label}", style=SHOWN if label in present else HIDDEN) for label in TRIALS],
         ], style={"overflowY": "auto"}),
 
         html.Div([
@@ -597,19 +598,28 @@ def build_app(trials: dict[str, LoadedTrial], session: dict) -> Dash:
             html.Div(id="figure-gallery", style={"display": "flex", "gap": "8px",
                                                  "flexWrap": "wrap", "padding": "8px 12px"}),
         ]),
-    ], style={"flex": 1, "overflowY": "auto", "height": "100vh", "boxSizing": "border-box"})
+    ], style={"flex": 1, "overflowY": "auto", "height": "100%", "boxSizing": "border-box"})
 
-    app.layout = html.Div([
+    empty = html.Div([
+        html.H3("No recordings loaded yet", style={"margin": "0 0 8px"}),
+        html.P("The editor needs both recordings loaded. When the orientation cache exists they "
+               "load by themselves a few seconds after the server starts; otherwise run the "
+               "pipeline first.", style={"maxWidth": "560px", "color": "#555", "fontSize": "13px"}),
+        html.Button("Go to the Pipeline page", id="btn-goto-pipeline", n_clicks=0,
+                    style={"padding": "6px 12px", "fontSize": "13px"}),
+    ], id="editor-empty", style=HIDDEN if ready else EMPTY_STYLE)
+
+    return html.Div([
         dcc.Store(id="store-session", data=session),
         dcc.Store(id="store-selection", data={"family": "trunk", "event_id": _first_id(session, "trunk")}),
         dcc.Store(id="store-figrev", data=0),
         dcc.Store(id="store-view", data={}),
-        sidebar,
-        main,
-    ], style={"display": "flex", "fontFamily": "system-ui, sans-serif", "margin": 0})
-
-    register_callbacks(app, trials, displays)
-    return app
+        # The workspace revisions this page last loaded, so a finished job's
+        # changes are picked up once and only once.
+        dcc.Store(id="store-editor-revs", data=workspace.revision()),
+        empty,
+        html.Div([sidebar, main], id="editor-body", style=BODY_STYLE if ready else HIDDEN),
+    ], style={"height": "100%"})
 
 
 GRAPH_CONFIG = {
@@ -621,15 +631,12 @@ GRAPH_CONFIG = {
 }
 
 
-def _first_id(session: dict, family: str) -> str | None:
-    events = all_events(session, family)
+def _first_id(session: dict | None, family: str) -> str | None:
+    events = all_events(session, family) if session else []
     return events[0]["event_id"] if events else None
 
 
-def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict[str, dict]) -> None:
-    n_samples = {label: loaded.n_samples for label, loaded in trials.items()}
-    fs_of = {label: loaded.fs for label, loaded in trials.items()}
-
+def register_callbacks(app: Dash) -> None:
     BOUNDARY_INPUTS = [
         ("n-ev-start", "Novice", "event", 0), ("n-ev-end", "Novice", "event", 1),
         ("n-st-start", "Novice", "stab", 0), ("n-st-end", "Novice", "stab", 1),
@@ -645,6 +652,8 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         State("store-selection", "data"),
     )
     def update_selection(family, selected_rows, session, selection):
+        if session is None:
+            raise PreventUpdate
         if ctx.triggered_id == "family-tabs":
             return {"family": family, "event_id": _first_id(session, family)}
         events = all_events(session, family)
@@ -713,7 +722,7 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         """Mid-point of the visible range, or of the whole recording."""
         span = (view or {}).get(label)
         if not span:
-            return trials[label].duration_s / 2
+            return workspace.trials[label].duration_s / 2
         return 0.5 * (span[0] + span[1])
 
     # One callback both mutates and renders.  Dash rejects a dependency cycle
@@ -750,6 +759,7 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         Input("btn-load-session", "n_clicks"),
         Input("btn-new-session", "n_clicks"),
         Input("store-selection", "data"),
+        Input("store-editor-revs", "data"),
         State("store-session", "data"),
         State("p-rel-thr", "value"), State("p-floor", "value"),
         State("p-min-dur", "value"), State("p-min-exc", "value"),
@@ -768,11 +778,17 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         values = list(args[: len(BOUNDARY_INPUTS)])
         rest = args[len(BOUNDARY_INPUTS):]
         (_redetect, _toggle, _delete, _add, _restore, _save_session, _load_session, _new_session,
-         selection, session,
+         selection, _editor_revs, session,
          rel_thr, floor_pct, min_dur, min_exc, n_events, lam, horizon, stab_dur,
          knee_thr, knee_dur, knee_gap,
          smooth_unit, smooth_lobe, smooth_sep, smooth_exc, smooth_min_dur, smooth_max_dur,
          view, add_trial, add_leg, trash_index, session_name, session_choice) = rest
+
+        trials, displays = workspace.trials, workspace.displays
+        if trials is None or session is None:
+            raise PreventUpdate
+        fs_of = {label: loaded.fs for label, loaded in trials.items()}
+        n_samples = {label: loaded.n_samples for label, loaded in trials.items()}
 
         trigger = ctx.triggered_id
         session = dict(session)
@@ -893,7 +909,7 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
 
         if trigger == "btn-add":
             stab_len = float(stab_dur or 3.0)
-            centres = {label: view_centre(view, label) for label in TRIALS}
+            centres = {label: view_centre(view, label) for label in trials}
             if family == "trunk":
                 new = sessions.add_trunk_event(session, trials, centres, stab_len_s=stab_len)
             elif family == "knee":
@@ -983,6 +999,9 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         )
         patches = []
         for label in TRIALS:
+            if label not in trials:
+                patches.append(no_update)  # no recording in this role: its graph is hidden
+                continue
             patch = Patch()
             patch["layout"]["shapes"] = build_shapes(
                 session, selection, label, fs_of[label], displays[label],
@@ -1048,11 +1067,21 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
         prevent_initial_call=True,
     )
     def recalculate(_clicks, session, figrev, family):
+        trials = workspace.trials
+        if trials is None or session is None:
+            raise PreventUpdate
+        # A pipeline job holds the lock while it writes outputs/; wait for it
+        # rather than interleave two sets of CSVs.
+        if not WORK_LOCK.acquire(blocking=False):
+            return (no_update, no_update, no_update, no_update,
+                    "A pipeline job is running. Recalculate once it has finished.")
         try:
-            with RECOMPUTE_LOCK:
-                result = recompute(session, trials, write=True)
+            result = recompute(session, trials, write=True)
         except Exception as error:  # surfaced in the UI instead of killing the callback
             return no_update, no_update, no_update, no_update, f"Recalculation failed:\n{error}"
+        finally:
+            WORK_LOCK.release()
+        workspace.bump("results")
 
         # Every family is recalculated, but the table shows the one whose tab is
         # open -- the numbers you were just curating windows for.
@@ -1078,15 +1107,77 @@ def register_callbacks(app: Dash, trials: dict[str, LoadedTrial], displays: dict
 
     @app.callback(Output("header-meta", "children"), Input("store-session", "data"))
     def header(_session):
-        parts = [
-            f"fs {trials['Novice'].fs:.2f} Hz",
-            f"Novice {trials['Novice'].duration_s:.0f} s / Trained {trials['Trained'].duration_s:.0f} s",
-            # Read the live module flag, not the stored one: the header must
-            # describe the code about to run, not the code that seeded the file.
-            f"high-pass {'disabled' if config.IGNORE_HIGH_PASS_FILTER else 'enabled'}",
-            f"session {sessions.SESSION_PATH.name}",
-        ]
-        return " | ".join(parts)
+        return header_text()
+
+
+    @app.callback(
+        Output("graph-Novice", "figure", allow_duplicate=True),
+        Output("graph-Trained", "figure", allow_duplicate=True),
+        Output("store-session", "data", allow_duplicate=True),
+        Output("store-selection", "data", allow_duplicate=True),
+        Output("store-editor-revs", "data"),
+        Output("editor-empty", "style"),
+        Output("editor-body", "style"),
+        *[Output(f"graph-section-{label}", "style") for label in TRIALS],
+        *[Output(f"graph-title-{label}", "children") for label in TRIALS],
+        Output("add-trial", "options"),
+        Output("add-trial", "value"),
+        Input("store-revs", "data"),
+        State("store-editor-revs", "data"),
+        State("store-selection", "data"),
+        prevent_initial_call=True,
+    )
+    def sync_with_server(revs, seen, selection):
+        """Reload whatever a finished job changed: the recordings, the session, or both.
+
+        The session is read back from disk, which is safe because every edit
+        made on this page is written there as it happens.  When a different
+        selection has been made and not loaded yet, the page goes back to its
+        placeholder.
+        """
+        if not revs:
+            raise PreventUpdate
+        seen = seen or {}
+        data_changed = revs.get("data") != seen.get("data")
+        if not data_changed and revs.get("session") == seen.get("session"):
+            raise PreventUpdate
+        family = (selection or {}).get("family", "trunk")
+
+        present = loaded_roles()
+        sections = [SHOWN if label in present else HIDDEN for label in TRIALS]
+        titles = [graph_title(label) for label in TRIALS]
+        add_options, add_value = add_trial_options(present)
+        if not workspace.ready:
+            return ({}, {}, None, {"family": family, "event_id": None}, revs, EMPTY_STYLE, HIDDEN,
+                    *sections, *titles, add_options, add_value)
+
+        displays = workspace.displays
+        figures = ([base_figure(label, displays[label]) if label in present else {} for label in TRIALS]
+                   if data_changed else [no_update, no_update])
+        session = sessions.load_session()
+        kept = (selection or {}).get("event_id")
+        if not any(event["event_id"] == kept for event in all_events(session, family)):
+            kept = _first_id(session, family)
+        # store-editor-revs is also an input of edit_and_render, so setting it
+        # re-renders the bands, table and boundary boxes for the reloaded session.
+        return (*figures, session, {"family": family, "event_id": kept}, revs,
+                HIDDEN, BODY_STYLE, *sections, *titles, add_options, add_value)
+
+
+def header_text() -> str:
+    trials = workspace.trials
+    if trials is None:
+        return ""
+    first = next(iter(trials.values()))
+    parts = [
+        f"fs {first.fs:.2f} Hz",
+        " / ".join(f"{label} {loaded.duration_s:.0f} s" for label, loaded in trials.items()),
+        # Read the live module flag, not the stored one: the header must
+        # describe the code about to run, not the code that seeded the file.
+        f"high-pass {'disabled' if config.IGNORE_HIGH_PASS_FILTER else 'enabled'}",
+        f"session outputs/analyses/{recordings.active().id}/{sessions.SESSION_FILENAME}",
+    ]
+    return " | ".join(parts)
 
 
 def describe_event(event: dict | None, selection: dict) -> str:
@@ -1119,46 +1210,3 @@ def render_issues(issues: list[Issue]) -> list:
     if hidden > 0:
         children.append(html.Div(f"... and {hidden} more", style={"color": "#888"}))
     return children
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8051, help="port to serve on (default 8051)")
-    parser.add_argument("--recompute-orientation", action="store_true",
-                        help="re-run the Madgwick filter instead of using outputs/orientation_*.npz")
-    parser.add_argument("--reseed", choices=["auto", "v1"], default=None,
-                        help="discard the saved session and reseed from the detectors or the committed v1 CSVs")
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
-
-    print("Loading recordings ...")
-    trials = load_all_trials(recompute_orientation=args.recompute_orientation)
-    for label, loaded in trials.items():
-        print(f"  {label}: {loaded.n_samples} samples at {loaded.fs:.4f} Hz ({loaded.duration_s:.1f} s)")
-
-    session = None if args.reseed else sessions.load_session()
-    if session is None:
-        if args.reseed == "v1":
-            print("Seeding from the committed v1 window CSVs ...")
-            session = sessions.seed_session_from_v1_csvs(trials)
-        else:
-            print("Detecting events ...")
-            session = sessions.seed_session(trials)
-        sessions.save_session(sessions.refresh_seconds(session, trials))
-    else:
-        session, notes = sessions.migrate_session(session, trials)
-        for note in notes:
-            print(f"  migrated: {note}")
-        if notes:
-            sessions.save_session(sessions.refresh_seconds(session, trials))
-    print(f"  {len(session['trunk_events'])} trunk events, "
-          f"{len(session['knee_events'])} monopodal-stance events, "
-          f"{len(session.get('smooth_events', []))} sequence segments")
-
-    app = build_app(trials, session)
-    print(f"\nEditor running at http://127.0.0.1:{args.port}\n")
-    app.run(debug=args.debug, port=args.port)
-
-
-if __name__ == "__main__":
-    main()

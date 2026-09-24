@@ -2,8 +2,8 @@
 
 * **Raw input** -- the Delsys Trigno Discover CSV export, parsed into a
   :class:`TrialData` holding one DataFrame per sensor.
-* **Orientation cache** -- ``outputs/orientation_<trial>.npz`` holds the
-  body-frame quaternions.  The Madgwick filter that produces them is the only
+* **Orientation cache** -- ``orientation.npz`` in each recording's output folder
+  (:mod:`analysis.recordings`) holds the body-frame quaternions.  The Madgwick filter that produces them is the only
   slow step of the pipeline, so everything else rebuilds its kinematics from
   this file (:func:`analysis.kinematics.load_trial`).
 * **Exports** -- the per-sensor inventory and the 50 Hz kinematic-variable CSV.
@@ -118,7 +118,7 @@ def make_sensor_inventory(trials: list[TrialData]) -> pd.DataFrame:
             diffs = np.diff(time)
             rows.append(
                 {
-                    "trial": trial.label,
+                    "recording": trial.label,
                     "sensor": sensor,
                     "body_segment": config.SENSOR_MAP.get(sensor, "Unmapped"),
                     "samples": len(df),
@@ -138,15 +138,11 @@ def make_sensor_inventory(trials: list[TrialData]) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def orientation_path(label: str) -> Path:
-    return config.OUTPUT_DIR / f"orientation_{label.lower()}.npz"
-
-
-def save_orientation_npz(label: str, kin: Kinematics) -> None:
+def save_orientation_npz(path: Path, kin: Kinematics) -> None:
     payload = {"time_s": kin.t}
     for sensor, q in kin.quaternions.items():
         payload[f"{sensor}_q_wxyz"] = q
-    np.savez_compressed(orientation_path(label), **payload)
+    np.savez_compressed(path, **payload)
 
 
 def load_orientation_npz(path: Path) -> tuple[np.ndarray, dict[str, np.ndarray]]:
@@ -169,7 +165,7 @@ EXPORTED_JOINTS = (
 """Joint angles in the export, in column order.  Each contributes x, y and z."""
 
 
-def save_kinematic_variables(label: str, kin: Kinematics, fs: float, target_fs: float = 50.0) -> None:
+def save_kinematic_variables(path: Path, kin: Kinematics, fs: float, target_fs: float = 50.0) -> None:
     """Write the trunk angles, angular speeds and every joint angle at 50 Hz.
 
     Each channel is anti-alias filtered and resampled.  Yaw (z) channels and
@@ -199,4 +195,4 @@ def save_kinematic_variables(label: str, kin: Kinematics, fs: float, target_fs: 
     resampled = {name: resample_filtered_full(kin.t, signal, fs, target_fs) for name, signal in channels.items()}
     time_s = resampled["trunk_pelvis_x_deg"][0]
     df = pd.DataFrame({"time_s": time_s, **{name: values for name, (_, values) in resampled.items()}})
-    df.to_csv(config.OUTPUT_DIR / f"kinematic_variables_{label.lower()}_50hz.csv", index=False)
+    df.to_csv(path, index=False)

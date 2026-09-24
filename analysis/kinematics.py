@@ -15,16 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from analysis import config
-from analysis.data_io import (
-    ACC_COLUMNS,
-    GYRO_COLUMNS,
-    TrialData,
-    load_orientation_npz,
-    orientation_path,
-    parse_IMU_csv,
-    save_orientation_npz,
-)
+from analysis.data_io import ACC_COLUMNS, GYRO_COLUMNS, TrialData, load_orientation_npz, parse_IMU_csv
 from analysis.orientation import (
     get_nominal_sensor_quaternion,
     madgwick_imu,
@@ -33,6 +24,7 @@ from analysis.orientation import (
     quat_multiply,
     quat_to_euler_deg,
 )
+from analysis.recordings import Recording, Selection, active
 
 
 @dataclass
@@ -120,12 +112,30 @@ def find_neutral_pose_window(trial: TrialData, min_duration_s: float = 2.0) -> t
     return best_start, best_end
 
 
-def compute_kinematics(trial: TrialData) -> Kinematics:
+def sensor_signals(trial: TrialData) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Accelerometer (g) and gyroscope (deg/s) samples per sensor, cut to a common length.
+
+    These are the inputs of the orientation filter, one independent run per
+    sensor, which is what lets :mod:`analysis.pipeline` run them in parallel.
+    """
+    n = min(len(df) for df in trial.data.values())
+    signals = {}
+    for sensor in trial.sensors:
+        df = trial.data[sensor].iloc[:n]
+        signals[sensor] = (df[ACC_COLUMNS].to_numpy(), df[GYRO_COLUMNS].to_numpy())
+    return signals
+
+
+def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None = None) -> Kinematics:
     """Run the orientation filter on every sensor and derive all joint angles.
 
     Each sensor's Madgwick output is re-referenced to the neutral pose, then
     rotated from the sensor's own axes into the body frame:
     ``q_body = q_mount * q_neutral^-1 * q_raw * q_mount^-1``.
+
+    ``raw_quats`` supplies the filter output per sensor when it has already
+    been computed from :func:`sensor_signals`; otherwise it is computed here,
+    one sensor after another.
     """
     n = min(len(df) for df in trial.data.values())
     t = trial.data[trial.sensors[0]]["time"].to_numpy()[:n]
@@ -134,20 +144,19 @@ def compute_kinematics(trial: TrialData) -> Kinematics:
 
     neutral_start, neutral_end = find_neutral_pose_window(trial)
 
-    for sensor in trial.sensors:
-        df = trial.data[sensor].iloc[:n]
-        acc = df[ACC_COLUMNS].to_numpy()
-        gyro = df[GYRO_COLUMNS].to_numpy()
-
-        raw_quats = madgwick_imu(acc, gyro, trial.fs)
-        q_offset = mean_quaternion(raw_quats[neutral_start:neutral_end])
+    for sensor, (acc, gyro) in sensor_signals(trial).items():
+        if raw_quats is None:
+            sensor_quats = madgwick_imu(acc, gyro, trial.fs)
+        else:
+            sensor_quats = raw_quats[sensor]
+        q_offset = mean_quaternion(sensor_quats[neutral_start:neutral_end])
         q_nom = get_nominal_sensor_quaternion(sensor)
 
         q_O_inv = quat_inverse(q_offset)
         q_nom_inv = quat_inverse(q_nom)
 
         step1 = quat_multiply(q_nom, q_O_inv)
-        step2 = quat_multiply(step1, raw_quats)
+        step2 = quat_multiply(step1, sensor_quats)
         quats[sensor] = quat_multiply(step2, q_nom_inv)
         omega_mag[sensor] = np.linalg.norm(gyro, axis=1)
 
@@ -188,58 +197,46 @@ def kinematics_from_quaternions(
 
 @dataclass
 class LoadedTrial:
-    """One recording, parsed and with its kinematics."""
+    """One recording loaded in one role, parsed and with its kinematics."""
 
     label: str
+    """The role: ``"Novice"`` or ``"Trained"``."""
     kin: Kinematics
     trial: TrialData
     fs: float
     n_samples: int
+    recording: Recording
 
     @property
     def duration_s(self) -> float:
         return float(self.kin.t[-1])
 
 
-def load_trial(label: str, recompute_orientation: bool = False) -> LoadedTrial:
-    """Load one recording, rebuilding kinematics from the cached quaternions.
+def load_trial(recording: Recording, label: str) -> LoadedTrial:
+    """Load one recording in a role, rebuilding its kinematics from the orientation cache.
 
     Parsing the raw CSV takes ~1.6 s and rederiving every angle from the cache
-    ~0.35 s, against minutes for the Madgwick filter.  The cache is trusted as
-    the filter's output: if the orientation code itself changes, pass
-    ``recompute_orientation=True`` to run :func:`compute_kinematics` and rewrite
-    the cache.
+    ~0.35 s, against much longer for the Madgwick filter, which is why the
+    cache (written by :func:`analysis.pipeline.preprocess`) is required.
     """
-    csv_path = config.CSV_FOR_TRIAL[label]
-    if not csv_path.exists():
+    if not recording.path.exists():
+        raise FileNotFoundError(f"Raw recording not found: {recording.path}")
+    if not recording.orientation_path.exists():
         raise FileNotFoundError(
-            f"Raw recording not found: {csv_path}\n"
-            "data/ is git-ignored, so a fresh clone has no IMU CSVs."
+            f"{recording.name} has not been preprocessed yet (no {recording.orientation_path}). "
+            "Run the pipeline first."
         )
 
-    trial = parse_IMU_csv(csv_path, label)
+    trial = parse_IMU_csv(recording.path, label)
     n = min(len(df) for df in trial.data.values())
 
-    if recompute_orientation:
-        kin = compute_kinematics(trial)
-        save_orientation_npz(label, kin)
-        return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=len(kin.t))
-
-    npz_path = orientation_path(label)
-    if not npz_path.exists():
-        raise FileNotFoundError(
-            f"Orientation cache not found: {npz_path}\n"
-            "Run analysis/pipeline.py once, or start the editor with --recompute-orientation."
-        )
-
-    time_s, quats = load_orientation_npz(npz_path)
+    time_s, quats = load_orientation_npz(recording.orientation_path)
     quats = {sensor: q[:n] for sensor, q in quats.items()}
 
     if len(time_s) != n:
         raise ValueError(
-            f"{npz_path.name} holds {len(time_s)} samples but {csv_path.name} parses to {n}. "
-            "The orientation cache is out of sync with the recording; "
-            "restart with --recompute-orientation."
+            f"{recording.orientation_path} holds {len(time_s)} samples but {recording.name} parses "
+            f"to {n}. The orientation cache is out of sync with the recording: preprocess it again."
         )
 
     omega = {
@@ -247,8 +244,13 @@ def load_trial(label: str, recompute_orientation: bool = False) -> LoadedTrial:
         for sensor in quats
     }
     kin = kinematics_from_quaternions(time_s, quats, omega)
-    return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=n)
+    return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=n, recording=recording)
 
 
-def load_all_trials(recompute_orientation: bool = False) -> dict[str, LoadedTrial]:
-    return {label: load_trial(label, recompute_orientation) for label in config.TRIALS}
+def load_all_trials(selection: Selection | None = None) -> dict[str, LoadedTrial]:
+    """Every selected recording, keyed by role (the active selection by default)."""
+    selection = selection or active()
+    problem = selection.problem()
+    if problem:
+        raise ValueError(f"Cannot load the recordings: {problem}.")
+    return {label: load_trial(recording, label) for label, recording in selection.recordings().items()}

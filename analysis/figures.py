@@ -1,8 +1,19 @@
-"""The output figures, written to ``config.OUTPUT_DIR``.
+"""The output figures.
 
 The traceability figures draw the signal the event boundaries were taken from,
 with the bands on it, above a bar chart of the metrics computed over those
-bands, so every number can be traced back to a stretch of the recording.
+bands, so every number can be traced back to a stretch of the recording.  Each
+takes the recordings to draw as ``{role: ...}`` dicts -- one row per recording,
+so a novice-only or trained-only analysis gets a figure of its own -- and names
+the source files underneath, so a figure copied into a report still says what
+it was made from.
+
+Figures are built with :class:`matplotlib.figure.Figure` rather than pyplot, so
+they always render off-screen through Agg.  With pyplot they would go through
+whatever interactive backend is active -- on macOS that one shrinks a figure
+taller than the screen before saving it, so the same analysis wrote a
+different PNG from the command line than from the dashboard.  It also keeps
+pyplot's global state out of the dashboard's worker threads.
 """
 
 from __future__ import annotations
@@ -13,31 +24,47 @@ from pathlib import Path
 # Matplotlib needs a writable config directory, which the default may not be.
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp") / "matplotlib"))
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 import pandas as pd
 
-from analysis import config
+from analysis.config import TRIALS
 from analysis.detection_v1 import find_stabilization as find_stabilization_v1
 from analysis.kinematics import Kinematics
 from analysis.signals import highpass_detrend, lowpass_signal, resample_filtered_full
 
 
 TRIAL_COLOURS = {"Novice": "#d1495b", "Trained": "#2a9d8f"}
+SHORT = {"Novice": "Nov", "Trained": "Train"}
 
 
-def _metric_bars(fig: plt.Figure, cell, metrics: pd.DataFrame, metric_names: list[str], pretty: list[str]) -> None:
-    """One small novice-vs-trained bar chart per metric, side by side in ``cell``."""
+def _roles(recordings: dict) -> list[str]:
+    return [label for label in TRIALS if label in recordings]
+
+
+def _comparison(labels: list[str]) -> str:
+    return " vs ".join(labels) if len(labels) > 1 else f"{labels[0]} only"
+
+
+def _sources(fig: Figure, sources: dict[str, str]) -> None:
+    """Name the recording files under the figure."""
+    fig.supxlabel("    ".join(f"{label}: {name}" for label, name in sources.items()),
+                  fontsize=8, color="#666666")
+
+
+def _metric_bars(fig: Figure, cell, metrics: pd.DataFrame, metric_names: list[str], pretty: list[str],
+                 labels: list[str]) -> None:
+    """One small bar chart per metric, one bar per recording, side by side in ``cell``."""
     gs_bars = cell.subgridspec(1, len(metric_names))
+    positions = list(range(len(labels)))
     for i, (m, p) in enumerate(zip(metric_names, pretty)):
         ax = fig.add_subplot(gs_bars[0, i])
-        nov_val = metrics.loc[metrics.trial == "Novice", m].mean()
-        train_val = metrics.loc[metrics.trial == "Trained", m].mean()
+        values = [metrics.loc[metrics.trial == label, m].mean() for label in labels]
 
-        bars = ax.bar([0, 1], [nov_val, train_val], color=[TRIAL_COLOURS["Novice"], TRIAL_COLOURS["Trained"]])
+        bars = ax.bar(positions, values, color=[TRIAL_COLOURS[label] for label in labels])
         ax.bar_label(bars, fmt="%.3g", padding=3, fontsize=8)
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Nov", "Train"], fontsize=9)
+        ax.set_xticks(positions)
+        ax.set_xticklabels([SHORT[label] for label in labels], fontsize=9)
         ax.set_title(p, fontsize=10)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -49,17 +76,19 @@ def _metric_bars(fig: plt.Figure, cell, metrics: pd.DataFrame, metric_names: lis
 
 
 def make_trunk_traceability_figure(
-    novice: Kinematics,
-    trained: Kinematics,
+    kins: dict[str, Kinematics],
+    fs_of: dict[str, float],
     metrics: pd.DataFrame,
     windows: dict[str, list[tuple[int, int, int, int, float]]],
-    fs: float,
+    sources: dict[str, str],
+    out_dir: Path,
 ) -> None:
-    fig = plt.figure(figsize=(12, 8.5), constrained_layout=True)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 1.0])
-    axes = [fig.add_subplot(gs[i, 0]) for i in range(2)]
+    labels = _roles(kins)
+    fig = Figure(figsize=(12, 3.35 * len(labels) + 1.8), constrained_layout=True)
+    gs = fig.add_gridspec(len(labels) + 1, 1, height_ratios=[1.15] * len(labels) + [1.0])
 
-    for ax, label, kin in [(axes[0], "Novice", novice), (axes[1], "Trained", trained)]:
+    for row, label in enumerate(labels):
+        ax, kin, fs = fig.add_subplot(gs[row, 0]), kins[label], fs_of[label]
         t = kin.t
         z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
         z = lowpass_signal(z, fs, cutoff_hz=4.0)
@@ -69,7 +98,7 @@ def make_trunk_traceability_figure(
         for i, (event_start, event_end, stab_start, stab_end, peak) in enumerate(windows[label]):
             ax.axvspan(event_start / fs, event_end / fs, color="#f2b134", alpha=0.22, label="aligned event" if i == 0 else "")
             ax.axvspan(stab_start / fs, stab_end / fs, color="#57a773", alpha=0.18, label="stabilization" if i == 0 else "")
-            if label == "Novice":
+            if not np.isnan(peak):
                 ax.scatter([t[peak]], [z[peak]], s=30, color="#d1495b", zorder=4, label="z peak" if i == 0 else "")
 
         ax.set_ylabel(f"{label}\nangle (deg)")
@@ -88,11 +117,11 @@ def make_trunk_traceability_figure(
     ]
     pretty = ["yaw lag (s)", "log10 jerk", "orient var (deg)", "corr rate (Hz)", "ML sway (g²)", "AP sway (g²)"]
 
-    _metric_bars(fig, gs[2], metrics, metric_names, pretty)
+    _metric_bars(fig, gs[len(labels)], metrics, metric_names, pretty, labels)
 
-    fig.suptitle("Trunk Rotation Balance Traceability: Novice vs Trained Tai Chi", fontsize=14, fontweight="bold")
-    fig.savefig(config.OUTPUT_DIR / "trunk_traceability_figure.png", dpi=220)
-    plt.close(fig)
+    fig.suptitle(f"Trunk Rotation Balance Traceability: {_comparison(labels)} Tai Chi", fontsize=14, fontweight="bold")
+    _sources(fig, sources)
+    fig.savefig(out_dir / "trunk_traceability_figure.png", dpi=220)
 
 
 # ---------------------------------------------------------------------------
@@ -101,21 +130,19 @@ def make_trunk_traceability_figure(
 
 
 def make_knee_flexion_overview_figure(
-    novice: Kinematics,
-    trained: Kinematics,
+    kins: dict[str, Kinematics],
+    fs_of: dict[str, float],
     knee_events: dict[str, list[dict[str, float | str]]],
-    fs: float,
+    sources: dict[str, str],
+    out_dir: Path,
 ) -> None:
-    fig = plt.figure(figsize=(11, 9.2), constrained_layout=True)
-    gs = fig.add_gridspec(4, 1, height_ratios=[1.0, 0.9, 1.0, 0.9])
-    axes = [fig.add_subplot(gs[i, 0]) for i in range(4)]
+    labels = _roles(kins)
+    fig = Figure(figsize=(11, 4.6 * len(labels) + 0.4), constrained_layout=True)
+    gs = fig.add_gridspec(2 * len(labels), 1, height_ratios=[1.0, 0.9] * len(labels))
 
-    trial_specs = [
-        (axes[0], axes[1], "Novice", novice),
-        (axes[2], axes[3], "Trained", trained),
-    ]
-
-    for knee_ax, trunk_ax, label, kin in trial_specs:
+    for row, label in enumerate(labels):
+        knee_ax, trunk_ax = fig.add_subplot(gs[2 * row, 0]), fig.add_subplot(gs[2 * row + 1, 0])
+        kin, fs = kins[label], fs_of[label]
         t = kin.t
         left_knee = np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0))
         right_knee = np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0))
@@ -169,26 +196,25 @@ def make_knee_flexion_overview_figure(
         trunk_ax.legend(frameon=False, fontsize=8, ncol=3)
 
     fig.suptitle("Monopodal Stance (> 60° Flexion) and Trunk Balance Response", fontsize=14, fontweight="bold")
-    fig.savefig(config.OUTPUT_DIR / "monopodal_stance_overview_figure.png", dpi=220)
-    plt.close(fig)
+    _sources(fig, sources)
+    fig.savefig(out_dir / "monopodal_stance_overview_figure.png", dpi=220)
 
 
 def make_knee_traceability_figure(
-    novice: Kinematics,
-    trained: Kinematics,
+    kins: dict[str, Kinematics],
+    fs_of: dict[str, float],
     knee_metrics: pd.DataFrame,
     knee_events: dict[str, list[dict[str, float | str]]],
-    fs: float,
+    sources: dict[str, str],
+    out_dir: Path,
     stab_overrides: dict[str, list[tuple[int, int]]] | None = None,
 ) -> None:
-    fig = plt.figure(figsize=(13, 8.8), constrained_layout=True)
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.15, 1.15, 1.0])
-    axes = [fig.add_subplot(gs[i, 0]) for i in range(2)]
+    labels = _roles(kins)
+    fig = Figure(figsize=(13, 3.45 * len(labels) + 1.9), constrained_layout=True)
+    gs = fig.add_gridspec(len(labels) + 1, 1, height_ratios=[1.15] * len(labels) + [1.0])
 
-    for ax, label, kin in [
-        (axes[0], "Novice", novice),
-        (axes[1], "Trained", trained),
-    ]:
+    for row, label in enumerate(labels):
+        ax, kin, fs = fig.add_subplot(gs[row, 0]), kins[label], fs_of[label]
         t = kin.t
         knee = np.maximum(
             np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)),
@@ -252,15 +278,15 @@ def make_knee_traceability_figure(
         "pitch lag (s)",
     ]
 
-    _metric_bars(fig, gs[2], knee_metrics, metric_names, pretty)
+    _metric_bars(fig, gs[len(labels)], knee_metrics, metric_names, pretty, labels)
 
     fig.suptitle(
-        "Monopodal Stance Balance Traceability: Novice vs Trained Tai Chi",
+        f"Monopodal Stance Balance Traceability: {_comparison(labels)} Tai Chi",
         fontsize=14,
         fontweight="bold",
     )
-    fig.savefig(config.OUTPUT_DIR / "monopodal_stance_traceability_figure.png", dpi=220)
-    plt.close(fig)
+    _sources(fig, sources)
+    fig.savefig(out_dir / "monopodal_stance_traceability_figure.png", dpi=220)
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +299,8 @@ def make_sequence_smoothness_figure(
     fs: dict[str, float],
     metrics: pd.DataFrame,
     waveforms: dict[str, dict[str, object]],
+    sources: dict[str, str],
+    out_dir: Path,
 ) -> None:
     """Traceability figure: where the segments fell, and how alike they were.
 
@@ -281,8 +309,8 @@ def make_sequence_smoothness_figure(
     it, so a number can always be traced back to a piece of the recording.  The
     right column is the corridor that the consistency metrics summarise.
     """
-    trials = [label for label in ("Novice", "Trained") if label in yaw]
-    fig = plt.figure(figsize=(13, 8.5), constrained_layout=True)
+    trials = _roles(yaw)
+    fig = Figure(figsize=(13, 3.35 * len(trials) + 1.8), constrained_layout=True)
     gs = fig.add_gridspec(len(trials) + 1, 2, width_ratios=[2.0, 1.0],
                           height_ratios=[1.15] * len(trials) + [1.0])
 
@@ -354,8 +382,8 @@ def make_sequence_smoothness_figure(
 
     fig.suptitle("Sequence smoothness and chest-pelvis coordination, per part of the form",
                  fontsize=14, fontweight="bold")
-    fig.savefig(config.OUTPUT_DIR / "sequence_smoothness_figure.png", dpi=220)
-    plt.close(fig)
+    _sources(fig, sources)
+    fig.savefig(out_dir / "sequence_smoothness_figure.png", dpi=220)
 
 
 # ---------------------------------------------------------------------------
@@ -363,22 +391,21 @@ def make_sequence_smoothness_figure(
 # ---------------------------------------------------------------------------
 
 
-def make_orientation_validation_figure(novice: Kinematics, trained: Kinematics, fs: float) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(11, 6.8), sharex=False, constrained_layout=True)
-    for row, (label, kin) in enumerate([("Novice", novice), ("Trained", trained)]):
-        for col, sensor in enumerate(["lumbar", "chestbone"]):
-            ax = axes[row, col]
-            target_time, x = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 0], fs, 10.0)
-            _, y = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 1], fs, 10.0)
-            _, z = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 2], fs, 10.0)
-            ax.plot(target_time, x, lw=0.9, label="x")
-            ax.plot(target_time, y, lw=0.9, label="y")
-            ax.plot(target_time, z, lw=0.9, label="z")
-            ax.set_title(f"{label} {sensor} orientation")
-            ax.set_xlabel("time (s)")
-            ax.set_ylabel("angle (deg)")
-            ax.grid(True, color="#dddddd", lw=0.6)
-            ax.legend(frameon=False, fontsize=8, ncol=3)
-    fig.suptitle("Orientation Validation: Lumbar and Chestbone", fontsize=13, fontweight="bold")
-    fig.savefig(config.OUTPUT_DIR / "orientation_validation.png", dpi=220)
-    plt.close(fig)
+def make_orientation_validation_figure(kin: Kinematics, fs: float, source: str, path: Path) -> None:
+    """Lumbar and chest orientation of one recording, for sanity-checking the filter."""
+    fig = Figure(figsize=(11, 3.8), constrained_layout=True)
+    axes = fig.subplots(1, 2, sharex=False)
+    for ax, sensor in zip(axes, ["lumbar", "chestbone"]):
+        target_time, x = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 0], fs, 10.0)
+        _, y = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 1], fs, 10.0)
+        _, z = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 2], fs, 10.0)
+        ax.plot(target_time, x, lw=0.9, label="x")
+        ax.plot(target_time, y, lw=0.9, label="y")
+        ax.plot(target_time, z, lw=0.9, label="z")
+        ax.set_title(f"{sensor} orientation")
+        ax.set_xlabel("time (s)")
+        ax.set_ylabel("angle (deg)")
+        ax.grid(True, color="#dddddd", lw=0.6)
+        ax.legend(frameon=False, fontsize=8, ncol=3)
+    fig.suptitle(f"Orientation Validation: {source}", fontsize=13, fontweight="bold")
+    fig.savefig(path, dpi=220)

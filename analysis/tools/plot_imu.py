@@ -12,12 +12,12 @@ if __package__ in (None, ""):
     # Run as a script rather than with -m: make the ``analysis`` package importable.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from analysis import config
+from analysis import recordings
 
 # ============================================================
 # 1. Load file safely
 # ============================================================
-file_path = config.NOVICE_CSV
+file_path = recordings.selected_recording("Novice").path  # or any Delsys CSV
 
 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
     lines = f.readlines()
