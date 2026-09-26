@@ -1,3 +1,3 @@
-trial,peak_knee_flexion_diff_deg,time_to_stabilization_diff_s,lumbar_ml_acc_variance_diff_g2
-Novice,38.20113770347547,1.9736998421040122,6.286741510745758e-05
-Trained,18.121077219334992,0.44999996400000253,0.0001867369042887441
+trial,recording,peak_knee_flexion_diff_deg,time_to_stabilization_diff_s,lumbar_ml_acc_variance_diff_g2
+Novice,IMU_Trial_1_RC_Novice.csv,38.20113770347547,1.9736998421040122,6.286741510745758e-05
+Trained,IMU_Trial_3_RC_Trained.csv,18.121077219334992,0.44999996400000253,0.0001867369042887441

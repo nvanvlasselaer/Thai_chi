@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "created_utc": "2026-09-21T21:24:51+00:00",
-  "modified_utc": "2026-09-23T22:55:52+00:00",
+  "modified_utc": "2026-09-24T00:10:41+00:00",
   "fs": {
     "Novice": 370.3704,
     "Trained": 370.3704
@@ -1092,5 +1092,19 @@
         }
       }
     }
-  ]
+  ],
+  "recordings": {
+    "Novice": {
+      "file": "IMU_Trial_1_RC_Novice.csv",
+      "id": "IMU_Trial_1_RC_Novice",
+      "size": 161164454,
+      "sha256": "0872c7d155f9dd1be72b9b32cbdda52fa039faf4fe63069c3ce6d1d2be9e6615"
+    },
+    "Trained": {
+      "file": "IMU_Trial_3_RC_Trained.csv",
+      "id": "IMU_Trial_3_RC_Trained",
+      "size": 157620260,
+      "sha256": "cf85d08b0e40886cfc160c4d41c34d2fb7c9e92cfaeeef2931c4c181243fa2d0"
+    }
+  }
 }

@@ -1,0 +1,15 @@
+recording,sensor,body_segment,samples,duration_s,fs_hz,median_dt_s,max_dt_s,missing_channel_values,complete_accel_gyro
+IMU_Trial_1_RC_Novice.csv,chestbone,Thorax,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lfoot,Left Foot,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lhand,Left Hand,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lhumerus,Left Upper Arm,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lthigh,Left Thigh,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,ltibia,Left Shank,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lulna,Left Forearm,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,lumbar,Pelvis/Lower Trunk Proxy,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rfoot,Right Foot,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rhand,Right Hand,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rhumerus,Right Upper Arm,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rthigh,Right Thigh,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rtibia,Right Shank,89425,241.445,370.3704,0.0027,0.0027,0,True
+IMU_Trial_1_RC_Novice.csv,rulna,Right Forearm,89425,241.445,370.3704,0.0027,0.0027,0,True
