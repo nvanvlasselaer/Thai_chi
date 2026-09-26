@@ -1,0 +1,35 @@
+{
+  "computed_utc": "2026-09-24T00:10:41+00:00",
+  "analysis": "novice-IMU_Trial_1_RC_Novice__trained-IMU_Trial_3_RC_Trained",
+  "recordings": {
+    "Novice": {
+      "file": "IMU_Trial_1_RC_Novice.csv",
+      "id": "IMU_Trial_1_RC_Novice",
+      "size": 161164454,
+      "sha256": "0872c7d155f9dd1be72b9b32cbdda52fa039faf4fe63069c3ce6d1d2be9e6615"
+    },
+    "Trained": {
+      "file": "IMU_Trial_3_RC_Trained.csv",
+      "id": "IMU_Trial_3_RC_Trained",
+      "size": 157620260,
+      "sha256": "cf85d08b0e40886cfc160c4d41c34d2fb7c9e92cfaeeef2931c4c181243fa2d0"
+    }
+  },
+  "session_name": null,
+  "session_digest": "daeac3a5760e731a",
+  "ignore_high_pass_filter": false,
+  "files": [
+    "trunk_rotation_event_windows.csv",
+    "trunk_rotation_balance_metrics.csv",
+    "monopodal_stance_event_windows.csv",
+    "monopodal_stance_balance_metrics.csv",
+    "monopodal_stance_asymmetry_metrics.csv",
+    "sequence_smoothness_metrics.csv",
+    "sequence_variability_summary.csv",
+    "trunk_traceability_figure.png",
+    "monopodal_stance_overview_figure.png",
+    "monopodal_stance_traceability_figure.png",
+    "sequence_smoothness_figure.png",
+    "event_editor_session.json"
+  ]
+}

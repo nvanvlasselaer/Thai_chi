@@ -1,0 +1,29 @@
+{
+  "source": {
+    "file": "IMU_Trial_3_RC_Trained.csv",
+    "size": 157620260,
+    "mtime_ns": 1781358722000000000,
+    "sha256": "cf85d08b0e40886cfc160c4d41c34d2fb7c9e92cfaeeef2931c4c181243fa2d0"
+  },
+  "fs_hz": 370.3704,
+  "n_samples": 87515,
+  "duration_s": 236.288,
+  "sensors": [
+    "chestbone",
+    "rhand",
+    "ltibia",
+    "rthigh",
+    "rhumerus",
+    "lhand",
+    "lulna",
+    "lhumerus",
+    "rfoot",
+    "rulna",
+    "lfoot",
+    "rtibia",
+    "lumbar",
+    "lthigh"
+  ],
+  "processed_utc": "2026-09-24T00:10:28+00:00",
+  "processed_local": "24 Sep 2026 02:10"
+}
