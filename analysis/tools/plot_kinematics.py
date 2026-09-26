@@ -1,103 +1,82 @@
 #!/usr/bin/env python3
-"""Plot the 50 Hz joint-angle series written by the pipeline, in groups."""
+"""The kinematics check's sensor table and joint-angle panels, outside the dashboard.
+
+    python3 analysis/tools/plot_kinematics.py [--role Novice|Trained] [--recording FILE] [--save PNG]
+
+Shows one recording -- by default the selection's novice one, else the other
+-- as the dashboard's Kinematics check page does (see
+:mod:`analysis.kinematics_check`): prints the sensor table and plots the joint
+angles, left blue and right red, with the neutral pose (green) and the quiet
+standing spans (grey) shaded.  Needs the recording's orientation cache, i.e.
+stage 1 run once.  The stick figure is in ``animate_kinematics`` and
+``plot_frame``.
+"""
+import argparse
 import sys
 from pathlib import Path
 
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
 
 if __package__ in (None, ""):
     # Run as a script rather than with -m: make the ``analysis`` package importable.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from analysis import recordings
+from analysis import kinematics_check, recordings
+from analysis.kinematics import load_trial
 
-# The 50 Hz export of the selected novice recording (else the trained one);
-# set a path here to plot another.
-_recording = recordings.selected_recording("Novice")
-CSV_PATH = _recording.kinematics_path if _recording else None
-
-def load_data(filepath):
-    """Load the CSV file"""
-    try:
-        data = pd.read_csv(filepath)
-        print(f"Successfully loaded {filepath}")
-        print(f"Shape: {data.shape}")
-        print(f"Columns: {list(data.columns)}")
-        return data
-    except FileNotFoundError:
-        print(f"Error: File not found at {filepath}")
-        return None
-    except Exception as e:
-        print(f"Error loading file: {e}")
-        return None
+SIDE_COLOURS = {kinematics_check.LEFT: "#3a86c8", kinematics_check.RIGHT: "#d1495b"}
+COMPONENT_COLOURS = ("#1f77b4", "#e76f51", "#2a9d8f")
 
 
-def plot_angle_groups(data):
-    """Plot angles in logical groups"""
-    # Define angle groups
-    groups = {
-        'Trunk-Pelvis Angles': ['trunk_pelvis_x_deg', 'trunk_pelvis_y_deg', 'trunk_pelvis_z_deg'],
-        'Lumbar Angles': ['lumbar_x_deg', 'lumbar_y_deg', 'lumbar_z_deg'],
-        'Chest Angles': ['chest_z_deg'],
-        'Angular Velocities': ['lumbar_omega_dps', 'chest_omega_dps'],
-        'left_knee Angles': ['left_knee_x_est_deg', 'left_knee_y_est_deg', 'left_knee_z_est_deg'],
-        'right_knee Angles': ['right_knee_x_est_deg', 'right_knee_y_est_deg', 'right_knee_z_est_deg'],
-        'left_hip Angles': ['left_hip_x_est_deg', 'left_hip_y_est_deg', 'left_hip_z_est_deg'],
-        'right_hip Angles': ['right_hip_x_est_deg', 'right_hip_y_est_deg', 'right_hip_z_est_deg'],
-        'left_shoulder Angles': ['left_shoulder_x_est_deg', 'left_shoulder_y_est_deg', 'left_shoulder_z_est_deg'],
-        'right_shoulder Angles': ['right_shoulder_x_est_deg', 'right_shoulder_y_est_deg', 'right_shoulder_z_est_deg'], 
-    }
-    # Filter groups to only include columns that exist in the data
-    available_groups = {}
-    for group_name, columns in groups.items():
-        available_columns = [col for col in columns if col in data.columns]
-        if available_columns:
-            available_groups[group_name] = available_columns
-    
-    # Create subplots
-    n_groups = len(available_groups)
-    n_cols = 2
-    n_rows = (n_groups + n_cols - 1) // n_cols
-    
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4*n_rows))
-    fig.suptitle('Angle Groups', fontsize=14, fontweight='bold')
-    
-    # Flatten axes for easy iteration
-    axes = axes.flatten() if n_rows * n_cols > 1 else [axes]
-    
-    # Plot each group
-    for idx, (group_name, columns) in enumerate(available_groups.items()):
-        ax = axes[idx]
-        
-        for col in columns:
-            ax.plot(data['time_s'], data[col], linewidth=1.5, label=col.replace('_', ' ').title())
-        
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel('Angle (deg)' if 'dps' not in group_name.lower() else 'Angular Velocity (dps)')
-        ax.set_title(group_name)
+def main() -> None:
+    parser = argparse.ArgumentParser(description="The kinematics check of one recording, outside the dashboard.")
+    parser.add_argument("--role", choices=["Novice", "Trained"], default="Novice",
+                        help="which recording of the selection to show (default: the novice one, else the other)")
+    parser.add_argument("--recording", help="a file name in data/, instead of one of the selection")
+    parser.add_argument("--save", type=Path, help="write the figure to this file instead of showing it")
+    args = parser.parse_args()
+
+    recording = recordings.find(args.recording) if args.recording else recordings.selected_recording(args.role)
+    if recording is None:
+        sys.exit("No recording to show: select one in the dashboard, or pass --recording with a file in data/.")
+    if not recording.orientation_current():
+        sys.exit(f"{recording.name} has no current orientation cache: run stage 1 of the pipeline first.")
+    loaded = load_trial(recording, args.role)
+    kin, fs = loaded.kin, loaded.fs
+
+    rotations = kinematics_check.dedrifted_rotations(kin, fs)
+    check = kinematics_check.sensor_check(kin, loaded.trial, rotations)
+    with pd.option_context("display.width", 200, "display.max_columns", 20):
+        print(check.drop(columns=["notes"]).to_string(index=False))
+    for row in check.itertuples():
+        if row.notes:
+            print(f"  {row.sensor}: {row.notes}")
+    print(f"\n{recording.name}: {kinematics_check.summary(check)}.")
+
+    time, panels = kinematics_check.panel_series(kin, fs, 50.0, rotations)
+    neutral = [index / fs for index in kin.calibration.neutral]
+    quiet = [(start / fs, end / fs) for start, end in kin.calibration.quiet_spans]
+    fig, axes = plt.subplots(len(panels), 1, sharex=True, figsize=(14, 1.9 * len(panels)))
+    fig.suptitle(f"Kinematics check: {recording.name}", fontweight="bold")
+    for ax, panel in zip(axes, panels):
+        for start, end in quiet:
+            ax.axvspan(start, end, color="#9aa0a6", alpha=0.15, lw=0)
+        ax.axvspan(*neutral, color="#57a773", alpha=0.35, lw=0)
+        for k, (label, side, values) in enumerate(panel["traces"]):
+            ax.plot(time, values, lw=0.9, label=label,
+                    color=SIDE_COLOURS.get(side, COMPONENT_COLOURS[k % len(COMPONENT_COLOURS)]))
+        ax.set_title(panel["title"], fontsize=9, loc="left")
         ax.grid(True, alpha=0.3)
-        ax.legend(loc='best', fontsize=8)
-    
-    # Hide empty subplots
-    for idx in range(n_groups, len(axes)):
-        axes[idx].set_visible(False)
-    
-    plt.tight_layout()
-    plt.show()
+        ax.legend(loc="upper right", fontsize=7, ncol=3)
+    axes[-1].set_xlabel("time (s)")
+    fig.tight_layout()
+    if args.save:
+        fig.savefig(args.save, dpi=110)
+        print(f"Saved {args.save}")
+    else:
+        plt.show()
 
-
-def main():
-    # Load the data
-    data = load_data(CSV_PATH)
-    
-    if data is None:
-        return
-    
-    
-    print("\nPlotting angle groups...")
-    plot_angle_groups(data)
-    
 
 if __name__ == "__main__":
     main()

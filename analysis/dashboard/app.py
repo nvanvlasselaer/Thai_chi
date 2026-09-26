@@ -4,11 +4,12 @@ Start it from the repository root and open http://127.0.0.1:8051::
 
     python3 app.py [--port 8051] [--no-browser] [--debug]
 
-Three pages:
+Four pages:
 
-    Pipeline      what has been computed, what is out of date, and buttons to run it
-    Event editor  check and correct the windows every metric is computed on
-    Results       the metric tables and figures in outputs/
+    Pipeline           what has been computed, what is out of date, and buttons to run it
+    Kinematics check   whether the sensors sit as assumed and the kinematics look right
+    Event editor       check and correct the windows every metric is computed on
+    Results            the metric tables and figures in outputs/
 
 Long work runs as a background job (:mod:`analysis.dashboard.tasks`), and every
 page polls for its progress once a second.  When the selected recordings are
@@ -25,16 +26,18 @@ import flask
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from analysis import config, pipeline, recordings
-from analysis.dashboard import editor_page, pipeline_page, results_page, tasks
+from analysis.dashboard import check_page, editor_page, pipeline_page, results_page, tasks
 from analysis.dashboard.state import jobs, workspace
 
 HEADER_HEIGHT_PX = 48
 PAGES = {
     "pipeline": ("Pipeline", pipeline_page),
+    "check": ("Kinematics check", check_page),
     "editor": ("Event editor", editor_page),
     "results": ("Results", results_page),
 }
-JUMP_BUTTONS = {"btn-goto-pipeline": "pipeline", "btn-open-editor": "editor", "btn-open-results": "results"}
+JUMP_BUTTONS = {"btn-goto-pipeline": "pipeline", "btn-open-check": "check", "btn-open-editor": "editor",
+                "btn-open-results": "results"}
 TAB_STYLE = {"padding": "6px 16px", "fontSize": "13px", "border": "none", "backgroundColor": "transparent",
              "color": "#555", "lineHeight": "22px", "width": "auto", "whiteSpace": "nowrap"}
 TAB_SELECTED_STYLE = {**TAB_STYLE, "color": "#1d3557", "fontWeight": "600",
@@ -107,6 +110,7 @@ def register_callbacks(app: Dash) -> None:
         Input("url", "pathname"),
         Input("page-tabs", "value"),
         Input("btn-goto-pipeline", "n_clicks"),
+        Input("btn-open-check", "n_clicks"),
         Input("btn-open-editor", "n_clicks"),
         Input("btn-open-results", "n_clicks"),
     )
@@ -146,6 +150,7 @@ def create_app() -> Dash:
     app.layout = serve_layout
     register_callbacks(app)
     editor_page.register_callbacks(app)
+    check_page.register_callbacks(app)
     pipeline_page.register_callbacks(app)
     results_page.register_callbacks(app)
     return app

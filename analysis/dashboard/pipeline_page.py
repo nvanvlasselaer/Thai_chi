@@ -73,10 +73,12 @@ def _stages() -> list[tuple]:
           html.Div(id="catalogue-summary", style={"flexBasis": "100%", "fontSize": "11px", "color": "#888"})]),
         ("preprocess", "1", "Orientation and kinematics",
          "Parse each selected recording and run the Madgwick orientation filter on every sensor, in "
-         "parallel. Writes the orientation cache, the 50 Hz kinematic CSV, the sensor inventory and the "
-         "orientation validation figure to outputs/recordings/<recording>/, where every selection "
-         "using that recording finds them. Nothing here depends on the event windows.",
-         [html.Button("Run again", id="btn-stage-preprocess", n_clicks=0, style=BUTTON)]),
+         "parallel. Writes the orientation cache, the 50 Hz kinematic CSV, the sensor inventory, the "
+         "sensor check and the orientation validation figure to outputs/recordings/<recording>/, where "
+         "every selection using that recording finds them. Nothing here depends on the event windows. "
+         "Before going on, check that the sensors sit as assumed and the kinematics look right.",
+         [html.Button("Run again", id="btn-stage-preprocess", n_clicks=0, style=BUTTON),
+          html.Button("Check sensors and kinematics", id="btn-open-check", n_clicks=0, style=BUTTON)]),
         ("load", "2", "Recordings loaded",
          "Rebuild the selected recordings' kinematics from their orientation caches, for the editor "
          "and the metrics.",
@@ -194,11 +196,11 @@ def _load_status() -> tuple[str, str]:
 
 # The stage a progress message belongs to, from how the pipeline words it.
 STAGE_OF_MESSAGE = (
-    (("Parsing", "Orientation filter", "Deriving", "Drawing"), "preprocess"),
+    (("Parsing", "Orientation filter", "Deriving", "Drawing", "Rebuilding", "Sensor check"), "preprocess"),
     (("Loading the", "Preparing the event editor"), "load"),
     (("Selected", "Not preprocessed yet"), "recordings"),
     (("Detecting events", "Session migrated"), "session"),
-    (("Recalculating", "Trunk rotation:", "Monopodal stance:", "Sequence smoothness:", "WARNING"), "metrics"),
+    (("Recalculating", "Trunk rotation:", "Single-leg stance:", "Sequence turns:", "WARNING", "note"), "metrics"),
 )
 
 

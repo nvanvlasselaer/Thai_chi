@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "created_utc": "2026-09-21T21:24:51+00:00",
-  "modified_utc": "2026-09-26T02:03:15+00:00",
+  "modified_utc": "2026-09-26T15:48:23+00:00",
   "fs": {
     "Novice": 370.3704,
     "Trained": 370.3704
@@ -30,18 +30,18 @@
     "stab_baseline_percentile": 20,
     "stab_omega_cutoff_hz": 4,
     "smooth_yaw_cutoff_hz": 0.5,
-    "smooth_min_lobe_deg": 10,
+    "smooth_min_lobe_deg": 10.0,
     "smooth_min_lobe_separation_s": 1.5,
-    "smooth_min_excursion_deg": 10,
-    "smooth_min_duration_s": 2,
-    "smooth_max_duration_s": 20,
+    "smooth_min_excursion_deg": 10.0,
+    "smooth_min_duration_s": 1.0,
+    "smooth_max_duration_s": 15.0,
     "knee_method": "lift",
     "knee_lift_min_peak": 0.25,
     "knee_lift_rel_threshold": 0.15,
     "knee_lift_min_duration_s": 0.5,
     "stab_latency_weight": 0.65,
-    "stab_scale_percentile": 50.0,
-    "stab_low_confidence_z": 1.0
+    "stab_scale_percentile": 50,
+    "stab_low_confidence_z": 1
   },
   "lag_pad_s": 2,
   "knee_lag_window_s": [

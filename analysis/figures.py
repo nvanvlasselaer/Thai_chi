@@ -11,7 +11,10 @@ it was made from.
 The metric panels are paired: every event is the same movement in both
 recordings (the pairs come from the whole-recording alignment), so each is
 drawn as a line from its novice value to its trained value, with the medians on
-top.  A bar of means would hide which way each pair goes.
+top.  A bar of means would hide which way each pair goes.  Where an event has
+two windows -- the movement and the stabilization after it -- the panels are
+grouped by the window they are computed on, each group on the colour of that
+window's band in the time series above and headed by its name.
 
 Figures are built with :class:`matplotlib.figure.Figure` rather than pyplot, so
 they always render off-screen through Agg.  With pyplot they would go through
@@ -30,6 +33,7 @@ from pathlib import Path
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp") / "matplotlib"))
 
 import numpy as np
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 import pandas as pd
 
@@ -42,6 +46,11 @@ from analysis.signals import highpass_detrend, lowpass_signal, resample_filtered
 TRIAL_COLOURS = {"Novice": "#d1495b", "Trained": "#2a9d8f"}
 SHORT = {"Novice": "Nov", "Trained": "Train"}
 LEG_COLOURS = {"Left": "#f2b134", "Right": "#8ecae6"}
+WINDOWS = {
+    # kind of window: its band colour, the band's opacity, and a darker shade for text on it
+    "movement": ("#f2b134", 0.22, "#8a5a00"),
+    "stabilization": ("#57a773", 0.18, "#2d6a43"),
+}
 
 
 def _roles(recordings: dict) -> list[str]:
@@ -58,40 +67,63 @@ def _sources(fig: Figure, sources: dict[str, str]) -> None:
     fig.supxlabel(f"{names}    metrics v{config.METRICS_VERSION}", fontsize=8, color="#666666")
 
 
+def _paired_panel(ax, metrics: pd.DataFrame, name: str, title: str, labels: list[str], note: str = "") -> None:
+    """One metric: each event a line from novice to trained, medians on top."""
+    if name not in metrics:
+        ax.set_visible(False)
+        return
+    positions = {label: i for i, label in enumerate(labels)}
+    table = metrics.pivot_table(index="event_id", columns="trial", values=name, aggfunc="first")
+    if len(labels) == 2 and all(label in table for label in labels):
+        both = table[labels].dropna()
+        for _, row in both.iterrows():
+            ax.plot([0, 1], row.to_numpy(), color="#b0b0b0", lw=0.9, zorder=1)
+        n = len(both)
+    else:
+        n = int(table.notna().sum().max()) if len(table) else 0
+    for label in labels:
+        if label not in table:
+            continue
+        values = table[label].dropna().to_numpy()
+        ax.scatter(np.full(len(values), positions[label]), values, s=10, color=TRIAL_COLOURS[label],
+                   alpha=0.55, zorder=2)
+        if len(values):
+            ax.scatter([positions[label]], [np.median(values)], s=70, marker="_", linewidths=2.5,
+                       color=TRIAL_COLOURS[label], zorder=3)
+    ax.set_xticks(list(positions.values()))
+    ax.set_xticklabels([SHORT[label] for label in labels], fontsize=9)
+    ax.set_xlim(-0.4, len(labels) - 0.6)
+    ax.set_title(f"{title}\n(n = {n}{', ' + note if note else ''})", fontsize=9)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
 def _paired_panels(fig: Figure, cell, metrics: pd.DataFrame, metric_names: list[str], pretty: list[str],
                    labels: list[str]) -> None:
-    """One small panel per metric: each event a line from novice to trained, medians on top."""
+    """One small panel per metric, in a row."""
     grid = cell.subgridspec(1, len(metric_names))
-    positions = {label: i for i, label in enumerate(labels)}
     for i, (name, title) in enumerate(zip(metric_names, pretty)):
-        ax = fig.add_subplot(grid[0, i])
-        if name not in metrics:
-            ax.set_visible(False)
-            continue
-        table = metrics.pivot_table(index="event_id", columns="trial", values=name, aggfunc="first")
-        if len(labels) == 2 and all(label in table for label in labels):
-            both = table[labels].dropna()
-            for _, row in both.iterrows():
-                ax.plot([0, 1], row.to_numpy(), color="#b0b0b0", lw=0.9, zorder=1)
-            n = len(both)
-        else:
-            n = int(table.notna().sum().max()) if len(table) else 0
-        for label in labels:
-            if label not in table:
-                continue
-            values = table[label].dropna().to_numpy()
-            ax.scatter(np.full(len(values), positions[label]), values, s=10, color=TRIAL_COLOURS[label],
-                       alpha=0.55, zorder=2)
-            if len(values):
-                ax.scatter([positions[label]], [np.median(values)], s=70, marker="_", linewidths=2.5,
-                           color=TRIAL_COLOURS[label], zorder=3)
-        ax.set_xticks(list(positions.values()))
-        ax.set_xticklabels([SHORT[label] for label in labels], fontsize=9)
-        ax.set_xlim(-0.4, len(labels) - 0.6)
-        ax.set_title(f"{title}\n(n = {n})", fontsize=9)
-        ax.tick_params(axis="y", labelsize=8)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        _paired_panel(fig.add_subplot(grid[0, i]), metrics, name, title, labels)
+
+
+def _window_panels(fig: Figure, cell, metrics: pd.DataFrame, groups: list[tuple[str, str, list[tuple]]],
+                   labels: list[str]) -> None:
+    """The metric panels grouped by the window they are computed on.
+
+    ``groups`` is ``[(kind of window, header, [(metric, title, note), ...]), ...]``;
+    each group sits on its window's band colour (:data:`WINDOWS`), so it reads
+    as the numbers of the like-coloured stretches above.
+    """
+    blocks = fig.add_subfigure(cell).subfigures(
+        1, len(groups), width_ratios=[len(panels) for _, _, panels in groups], wspace=0.02)
+    for block, (kind, header, panels) in zip(np.atleast_1d(blocks), groups):
+        colour, alpha, text = WINDOWS[kind]
+        block.set_facecolor(to_rgba(colour, alpha))
+        block.suptitle(header, fontsize=10, fontweight="bold", color=text)
+        for ax, (name, title, note) in zip(np.atleast_1d(block.subplots(1, len(panels))), panels):
+            ax.set_facecolor("white")
+            _paired_panel(ax, metrics, name, title, labels, note)
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +138,15 @@ def make_trunk_traceability_figure(
     windows: dict[str, list[tuple[int, int, int, int, float]]],
     sources: dict[str, str],
     out_dir: Path,
+    lag_pad_s: float | None = None,
 ) -> None:
+    """The trunk-pelvis yaw with the rotation and post-rotation bands, above the paired metrics.
+
+    ``lag_pad_s`` is how far the lag's window reaches past the rotation on each
+    side, noted on its panel.
+    """
     labels = _roles(kins)
-    fig = Figure(figsize=(12, 3.35 * len(labels) + 2.1), constrained_layout=True)
+    fig = Figure(figsize=(12, 3.35 * len(labels) + 2.4), constrained_layout=True)
     gs = fig.add_gridspec(len(labels) + 1, 1, height_ratios=[1.15] * len(labels) + [1.2])
 
     for row, label in enumerate(labels):
@@ -120,28 +158,34 @@ def make_trunk_traceability_figure(
         ax.plot(t, z, color="#1f77b4", lw=1.2, label="trunk-pelvis yaw")
 
         for i, (event_start, event_end, stab_start, stab_end, peak) in enumerate(windows[label]):
-            ax.axvspan(event_start / fs, event_end / fs, color="#f2b134", alpha=0.22, label="rotation" if i == 0 else "")
-            ax.axvspan(stab_start / fs, stab_end / fs, color="#57a773", alpha=0.18,
-                       label="post-rotation window" if i == 0 else "")
+            ax.axvspan(event_start / fs, event_end / fs, color=WINDOWS["movement"][0], alpha=WINDOWS["movement"][1],
+                       label="movement window: the rotation" if i == 0 else "")
+            ax.axvspan(stab_start / fs, stab_end / fs, color=WINDOWS["stabilization"][0],
+                       alpha=WINDOWS["stabilization"][1],
+                       label="stabilization window: after the rotation" if i == 0 else "")
             if not np.isnan(peak):
                 ax.scatter([t[int(peak)]], [z[int(peak)]], s=30, color="#d1495b", zorder=4,
                            label="yaw peak" if i == 0 else "")
 
         ax.set_ylabel(f"{label}\nangle (deg)")
         ax.grid(True, color="#dddddd", lw=0.6)
-        ax.legend(loc="upper right", fontsize=8, frameon=False, ncol=4)
+        # Above the plot: the yaw fills the whole height, and a legend inside would cover it.
+        ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), fontsize=8, frameon=False, ncol=4,
+                  borderaxespad=0.2)
 
-    metric_names = [
-        "trunk_pelvis_lag_s",
-        "trunk_yaw_sparc",
-        "lumbar_ml_acc_rms_mps2",
-        "lumbar_ap_acc_rms_mps2",
-        "lumbar_frontal_tilt_sd_deg",
-        "lumbar_rms_angular_velocity_dps",
-    ]
-    pretty = ["pelvis-chest lag (s)", "rotation SPARC", "ML sway RMS (m/s²)", "AP sway RMS (m/s²)",
-              "frontal tilt SD (deg)", "lumbar ω RMS (deg/s)"]
-    _paired_panels(fig, gs[len(labels)], metrics, metric_names, pretty, labels)
+    lag_note = f"rotation ± {lag_pad_s:g} s" if lag_pad_s else ""
+    _window_panels(fig, gs[len(labels)], metrics, [
+        ("movement", "Movement window: the rotation", [
+            ("trunk_pelvis_lag_s", "pelvis-chest lag (s)", lag_note),
+            ("trunk_yaw_sparc", "rotation SPARC", ""),
+        ]),
+        ("stabilization", "Stabilization window: after the rotation", [
+            ("lumbar_ml_acc_rms_mps2", "ML sway RMS (m/s²)", ""),
+            ("lumbar_ap_acc_rms_mps2", "AP sway RMS (m/s²)", ""),
+            ("lumbar_frontal_tilt_sd_deg", "frontal tilt SD (deg)", ""),
+            ("lumbar_rms_angular_velocity_dps", "lumbar ω RMS (deg/s)", ""),
+        ]),
+    ], labels)
 
     fig.suptitle(f"Trunk Rotation Balance Traceability: {_comparison(labels)} Tai Chi", fontsize=14, fontweight="bold")
     _sources(fig, sources)
@@ -225,8 +269,9 @@ def make_knee_traceability_figure(
     sources: dict[str, str],
     out_dir: Path,
 ) -> None:
+    """The lift index with the single-leg support and settling bands, above the paired metrics."""
     labels = _roles(kins)
-    fig = Figure(figsize=(13, 3.45 * len(labels) + 2.2), constrained_layout=True)
+    fig = Figure(figsize=(13, 3.45 * len(labels) + 2.5), constrained_layout=True)
     gs = fig.add_gridspec(len(labels) + 1, 1, height_ratios=[1.15] * len(labels) + [1.2])
 
     for row, label in enumerate(labels):
@@ -236,10 +281,11 @@ def make_knee_traceability_figure(
         ax.plot(t, magnitude, color="#1f77b4", lw=1.2, label="|lift index|")
 
         for i, ev in enumerate(knee_events[label]):
-            ax.axvspan(ev["window_start_s"], ev["window_end_s"], color="#f2b134", alpha=0.22,
-                       label="single-leg support" if i == 0 else "")
-            ax.axvspan(ev["stabilization_start_s"], ev["stabilization_end_s"], color="#57a773", alpha=0.18,
-                       label="settling after touch-down" if i == 0 else "")
+            ax.axvspan(ev["window_start_s"], ev["window_end_s"], color=WINDOWS["movement"][0],
+                       alpha=WINDOWS["movement"][1], label="movement window: single-leg support" if i == 0 else "")
+            ax.axvspan(ev["stabilization_start_s"], ev["stabilization_end_s"], color=WINDOWS["stabilization"][0],
+                       alpha=WINDOWS["stabilization"][1],
+                       label="stabilization window: settling after touch-down" if i == 0 else "")
             peak = sec_to_idx(ev["peak_time_s"], fs, len(t))
             ax.scatter([ev["peak_time_s"]], [magnitude[peak]], s=30, color="#d1495b", zorder=4,
                        label="highest lift" if i == 0 else "")
@@ -248,17 +294,19 @@ def make_knee_traceability_figure(
         ax.grid(True, color="#dddddd", lw=0.6)
         ax.legend(frameon=False, fontsize=8)
 
-    metric_names = [
-        "support_duration_s",
-        "support_ml_acc_rms_mps2",
-        "support_frontal_tilt_sd_deg",
-        "support_rms_angular_velocity_dps",
-        "settle_ml_acc_rms_mps2",
-        "time_to_stabilization_s",
-    ]
-    pretty = ["support time (s)", "support ML sway (m/s²)", "support frontal tilt SD (deg)",
-              "support lumbar ω RMS (deg/s)", "settling ML sway (m/s²)", "time to settle (s)"]
-    _paired_panels(fig, gs[len(labels)], knee_metrics, metric_names, pretty, labels)
+    _window_panels(fig, gs[len(labels)], knee_metrics, [
+        ("movement", "Movement window: single-leg support", [
+            ("support_duration_s", "support time (s)", ""),
+            ("support_ml_acc_rms_mps2", "support ML sway (m/s²)", ""),
+            ("support_frontal_tilt_sd_deg", "support frontal tilt SD (deg)", ""),
+            ("support_rms_angular_velocity_dps", "support lumbar ω RMS (deg/s)", ""),
+        ]),
+        ("stabilization", "Stabilization window: settling after touch-down", [
+            ("settle_ml_acc_rms_mps2", "settling ML sway (m/s²)", ""),
+            # The gap from touch-down to the settling window's start: the window's latency.
+            ("time_to_stabilization_s", "time to settle (s)", "from touch-down"),
+        ]),
+    ], labels)
 
     fig.suptitle(f"Single-Leg Stance Balance Traceability: {_comparison(labels)} Tai Chi",
                  fontsize=14, fontweight="bold")

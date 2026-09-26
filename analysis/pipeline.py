@@ -7,9 +7,11 @@ role, one for the trained role, or just one of the two
 
     1. preprocess   per recording: parse it, run the orientation filter, and write
                     what does not depend on event windows -- the orientation
-                    cache, the 50 Hz kinematic CSV, the sensor inventory and the
-                    orientation validation figure -- to outputs/recordings/<id>/.
-                    Done once per recording and reused by every selection.
+                    cache, the 50 Hz kinematic CSV, the sensor inventory, the
+                    sensor check and the orientation validation figure -- to
+                    outputs/recordings/<id>/.  Done once per recording and
+                    reused by every selection; the dashboard's Kinematics check
+                    page shows whether the sensors and kinematics look right.
     2. load         rebuild the selected recordings' kinematics from their caches
     3. session      open the event windows every metric is computed on: the
                     selection's saved session, or a new one from the detectors
@@ -48,7 +50,7 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from analysis import config, recordings, sessions
+from analysis import config, kinematics_check, recordings, sessions
 from analysis.data_io import (
     TrialData,
     make_sensor_inventory,
@@ -129,16 +131,17 @@ def preprocess(
     """Stage 1 for each recording in ``targets``: parse, filter, write its output folder.
 
     The orientation filters of all of them run in one parallel pool.  A
-    recording whose orientation cache is current and only its 50 Hz export is
-    out of date is re-exported from the cache instead, which takes seconds and
-    leaves ``orientation.npz`` untouched -- unless ``force_orientation``.
+    recording whose orientation cache is current, and only something derived
+    from it is missing or out of date, has those outputs rebuilt from the cache
+    instead, which takes seconds and leaves ``orientation.npz`` untouched --
+    unless ``force_orientation``.
     """
     report = progress or _silent
     if not force_orientation:
-        exports = [recording for recording in targets if recording.orientation_current()]
-        for recording in exports:
-            export_kinematics(recording, report)
-        targets = [recording for recording in targets if recording not in exports]
+        cached = [recording for recording in targets if recording.orientation_current()]
+        for recording in cached:
+            rebuild_from_cache(recording, report)
+        targets = [recording for recording in targets if recording not in cached]
     parsed = []
     for recording in targets:
         if not recording.path.exists():
@@ -155,19 +158,28 @@ def preprocess(
         recording.output_dir.mkdir(parents=True, exist_ok=True)
         kin = compute_kinematics(trial, raw_quats=raw[trial.label])
         save_orientation_npz(recording.orientation_path, kin)
-        save_kinematic_variables(recording.kinematics_path, kin, trial.fs)
-        make_sensor_inventory([trial]).to_csv(recording.inventory_path, index=False)
-        make_orientation_validation_figure(kin, trial.fs, recording.name, recording.validation_figure_path)
+        _write_derived_outputs(recording, trial, kin, report)
         _write_recording_manifest(recording, trial, kin)
 
 
-def export_kinematics(recording: Recording, progress: Progress | None = None) -> None:
-    """Rebuild a recording's 50 Hz export from its orientation cache, without filtering again."""
+def _write_derived_outputs(recording: Recording, trial: TrialData, kin: Kinematics, report: Progress) -> None:
+    """Everything stage 1 writes besides the orientation cache and the manifest."""
+    save_kinematic_variables(recording.kinematics_path, kin, trial.fs)
+    make_sensor_inventory([trial]).to_csv(recording.inventory_path, index=False)
+    make_orientation_validation_figure(kin, trial.fs, recording.name, recording.validation_figure_path)
+    check = kinematics_check.sensor_check(kin, trial)
+    check.to_csv(recording.sensor_check_path, index=False)
+    report(f"Sensor check of {recording.name}: {kinematics_check.summary(check)}")
+    for _, row in check[check.status == "check"].iterrows():
+        report(f"Warning, {recording.name} {row.sensor}: {row.notes}")
+
+
+def rebuild_from_cache(recording: Recording, progress: Progress | None = None) -> None:
+    """Rebuild a recording's derived stage-1 outputs from its orientation cache, without filtering again."""
     report = progress or _silent
-    report(f"Rewriting the 50 Hz export of {recording.name} in format {config.EXPORT_VERSION} "
-           "(the orientation cache is current)")
+    report(f"Rebuilding the outputs of {recording.name} from its orientation cache (the cache is current)")
     loaded = load_trial(recording, recording.name)
-    save_kinematic_variables(recording.kinematics_path, loaded.kin, loaded.fs)
+    _write_derived_outputs(recording, loaded.trial, loaded.kin, report)
     manifest = recording.manifest() or {}
     manifest["export_version"] = config.EXPORT_VERSION
     manifest["exported_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -326,7 +338,11 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
     else:
         found = {state for state, _ in states.values()}
         worst = "missing" if "missing" in found else "stale" if "stale" in found else "done"
-        result["preprocess"] = StageStatus(worst, " · ".join(f"{role}: {why}" for role, (_, why) in states.items()))
+        parts = []
+        for role, (state, why) in states.items():
+            check = kinematics_check.summary_of(chosen[role].sensor_check_path) if chosen[role] else None
+            parts.append(f"{role}: {why}" + (f" — {check}" if state == "done" and check else ""))
+        result["preprocess"] = StageStatus(worst, " · ".join(parts))
 
     session = None if problem else sessions.load_session()
     if session is None:

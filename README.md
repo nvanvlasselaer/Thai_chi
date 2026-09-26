@@ -34,8 +34,9 @@ python3 app.py                            # opens the dashboard at http://127.0.
 
 Everything is done from the dashboard. On the **Pipeline** page press **Run pipeline**: it computes
 whatever is missing (about 25 s from scratch). On later starts the recordings load by themselves and
-the stages already done show as done. Check and correct the event windows in the **Event editor**, press **Recalculate**, and read the
-tables and figures on the **Results** page. The two recordings must be in `data/` first — see
+the stages already done show as done. Check on the **Kinematics check** page that the sensors sit
+where the analysis assumes, check and correct the event windows in the **Event editor**, press
+**Recalculate**, and read the tables and figures on the **Results** page. The two recordings must be in `data/` first — see
 [Data](#data).
 
 ---
@@ -101,11 +102,12 @@ python3 app.py [--port 8051] [--no-browser] [--debug]
 
 Starts the server and opens a browser tab. When the orientation cache exists the recordings load in
 the background within a few seconds of starting; until then the editor shows a placeholder. There
-are three pages, each with its own address:
+are four pages, each with its own address:
 
 | page | address | what it is for |
 | --- | --- | --- |
 | **Pipeline** | `/pipeline` | status of every stage, and the buttons that run them |
+| **Kinematics check** | `/check` | whether each sensor sits where the analysis assumes, and whether the movement looks like the video |
 | **Event editor** | `/editor` | check and correct the windows every metric is computed on |
 | **Results** | `/results` | the metric tables and figures in `outputs/`, and where they came from |
 
@@ -115,7 +117,7 @@ the button that re-runs it:
 | stage | what it does | re-run when |
 | --- | --- | --- |
 | Recordings | choose a novice and a trained recording from the CSVs in `data/`, or leave one empty; **Use these recordings** switches to that selection | you want to analyse other recordings |
-| 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory and orientation validation figure. Done once per recording and reused by every selection it is in | a recording changes (detected from its size and SHA-256) or the orientation code changes |
+| 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory, orientation validation figure and sensor check. Done once per recording and reused by every selection it is in. The card says which sensors, if any, need a look, and **Check sensors and kinematics** opens the Kinematics check page | a recording changes (detected from its size and SHA-256) or the orientation code changes |
 | 2 · Recordings loaded | rebuilds the kinematics from the caches (about 5 s) | after stage 1 (automatic) |
 | 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors or the v1 detectors; the session it replaces is kept in its `sessions/_previous.json`. A session from an older schema is migrated when it is opened (the original is kept as `sessions/pre-schema-2-<name>.json`) | you want to start the curation over |
 | 4 · Metrics and figures | runs the windows through every metric and writes the CSVs and figures to the selection's folder | the windows, settings or recordings changed — the card says so |
@@ -141,6 +143,38 @@ CSVs and is intended to be committed.
 
 **Recalculating overwrites the output CSVs and figures in place.** The previous values remain
 available through git.
+
+### The kinematics check
+
+Stage 1 ends with a check of every sensor (`analysis/kinematics_check.py`), written to the
+recording's `sensor_check.csv` and shown on the Kinematics check page. A sensor is marked **check**
+when:
+
+- in the neutral pose it sits more than 45° from the orientation its mounting assumes (rotated or
+  turned over on the segment);
+- its accelerometer does not read 1 g ± 0.05 at rest;
+- it moves while the participant stands still: more than 3 robust SDs (1.4826 × MAD) above the
+  median sensor, in the stiller of the two quiet spans;
+- samples are missing;
+- a knee's flexion axis lies more than 45° from x (between 20° and 45° it is a note);
+- a leg segment moves the way its joint cannot: a raised thigh pointing backward, or a bent knee
+  swinging the shank forward, more than half the time. That is what a leg sensor turned around on its
+  segment, or left and right swapped, produces, and the neutral pose cannot show either, because
+  turning a sensor about the vertical leaves its tilt unchanged.
+
+Whether each sensor is on the segment it is labelled with is judged by eye. The page's stick figure
+can be scrubbed through the recording, or jumped to the moments that show a misplaced sensor: at the
+highest left-foot lift the figure's left leg must be the one up. Beside it are the joint angles, with
+left and right overlaid. Headings are de-drifted for display by taking out each sensor's slow turn
+about the vertical (below 0.05 Hz), computed from the quaternion's twist, which does not jump the way
+an Euler angle does. The arms are shown as shoulder elevation and elbow bend, the angles between long
+axes (see [Known limitations](#known-limitations)). The same panels and table are available outside
+the dashboard from `analysis/tools/plot_kinematics.py`.
+
+On the two recordings, every leg segment always moves the way its joint allows, and the knees'
+flexion axes lie 28–42° from x, turned opposite ways on the two legs. The trained participant's right
+foot is marked: in the stiller quiet span it moves at 17 °/s RMS, 2.4 times the median sensor and 9
+times the left foot.
 
 ### Without the dashboard
 
@@ -181,10 +215,12 @@ Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all f
 
 | command | purpose |
 | --- | --- |
-| `python3 analysis/tools/plot_kinematics.py` | plot the 50 Hz joint-angle series |
+| `python3 analysis/tools/plot_kinematics.py [--role R] [--recording FILE] [--save PNG]` | print the sensor check and plot the joint-angle panels of the Kinematics check page, for one recording |
 | `python3 analysis/tools/plot_imu.py` | separate Dash viewer for the raw accelerometer/gyroscope channels (port 8050) |
 | `python3 analysis/tools/animate_kinematics.py [npz] [out.mp4] [--start S --end E --fps N]` | render a 3D stick-figure animation (requires `ffmpeg`) |
 | `python3 analysis/tools/plot_frame.py [npz] [--axis-scale S]` | plot one skeleton frame with local axis triads, to check sensor alignment |
+| `python3 analysis/tools/method_checks.py` | re-run the checks the method choices rest on, and print their numbers (see [Boundary robustness](#boundary-robustness)) |
+| `python3 analysis/tools/boundary_robustness.py [--jitter 0.25] [--replicates 20] [--seed 0]` | jitter every event boundary and report each metric's ICC |
 | `python3 analysis/tools/yt_download.py` | download the video at the URL in the script from YouTube (requires `yt-dlp`) |
 
 ---
@@ -203,8 +239,12 @@ The body frame is **x = mediolateral** (the flexion/extension axis), **y = anter
 mounting tilt on the lordosis lies in the y–z plane (neutral acceleration 0.02, −0.30, 0.95 g), hip and
 knee flexion appear on Euler x, and the lumbar tilt about y changes sign with the lifted leg. (The
 code used to say x = forward; the AP and ML sway columns of metrics version 1 are therefore swapped.)
-The signs of +x and +y are not verified — that needs a functional-calibration trial — so only spread
-and range of signed angles are interpreted.
+For the leg sensors the signs follow from what the hip and knee can do. In both recordings the hips
+reach 86–111° of positive x rotation and the knees 85–116° of negative x rotation, which only flexion
+can. Every raised thigh points to +y and every bent knee swings the shank to −y, so x points **right**
+and y **forward** (the sensor check tests this per sensor). For the trunk and arm sensors the signs
+are still unverified, and a functional-calibration trial would settle them, so only the spread and
+range of signed trunk angles are interpreted.
 
 ### Gyroscope bias and the vertical reference
 
@@ -414,6 +454,7 @@ outputs/
     kinematic_variables_50hz.csv   all joint angles resampled to 50 Hz (40 columns; only yaw and joint z high-passed)
     sensor_inventory.csv           per-sensor sample counts, duration, sampling rate, missing values
     orientation_validation.png     lumbar and sternum orientation, for sanity-checking the filter
+    sensor_check.csv               per sensor: mounting tilt, |g| at rest, stillness, knee axis, leg direction, status
   analyses/<selection>/            one folder per selection of recordings
     analysis.json                  which recordings, by name, size and SHA-256
     event_editor_session.json      the curated windows and their provenance
@@ -439,9 +480,9 @@ still says where it came from.
 | `monopodal_stance_asymmetry_metrics.csv` | left-minus-right differences between mirrored stances |
 | `sequence_smoothness_metrics.csv`, `sequence_summary.csv` | per-turn metrics, and their medians per recording |
 | `recording_alignment.csv` | the novice-to-trained clock map at 1 Hz, for tracing any pair by hand |
-| `trunk_traceability_figure.png` | trunk-rotation time series with event and post-rotation bands, plus paired metrics |
+| `trunk_traceability_figure.png` | trunk-rotation time series with the movement (rotation) and stabilization (post-rotation) bands, above the paired metrics grouped by the window they are computed on, each group on its band's colour |
 | `monopodal_stance_overview_figure.png` | lift index, knee flexion and pelvis tilt |
-| `monopodal_stance_traceability_figure.png` | single-leg support and settling bands on the lift index, plus paired metrics |
+| `monopodal_stance_traceability_figure.png` | the lift index with the movement (single-leg support) and stabilization (settling) bands, above the paired metrics grouped the same way |
 | `sequence_smoothness_figure.png` | the turns, their typical time course, and paired metrics |
 
 Recalculating (stage 4) rewrites the selection's CSVs, figures and `metrics_provenance.json`. Stage 1
@@ -465,6 +506,8 @@ analysis/
   data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
   kinematics.py           segment and joint angles; gyroscope bias and vertical reference; fast loading
   gravity.py              tilt, turning rate, gravity-free sway and leg lift, from each segment's vertical
+  skeleton.py             the stick figure: its segments, and a pose from their orientations
+  kinematics_check.py     the sensor check, joint-angle panels and moments of the Kinematics check page
   alignment.py            whole-recording DTW between the two recordings; event and landmark matching
   detection.py            v2 event detection (trunk, stance, turns, stabilization), pairing via the alignment
   detection_v1.py         original fixed-window detector and DTW matching (v1)
@@ -479,6 +522,7 @@ analysis/
   dashboard/
     app.py                the Dash app: navigation, progress polling, the server
     pipeline_page.py      stage cards and the buttons that run them
+    check_page.py         the kinematics check: sensor table, stick figure, joint angles
     editor_page.py        the event-window editor
     results_page.py       metric tables and figures
     tasks.py              background jobs, each a sequence of pipeline stages
@@ -513,12 +557,27 @@ used without the ones after it — nothing outside `dashboard/` depends on Dash.
   across different events describes the choreography.
 - **Post-rotation windows are not quiet** (see [Stabilization](#stabilization)): read the trunk
   family's sway as the transition into the next movement.
-- **The right-foot gyroscope is noisy** — 16–21 °/s RMS while standing still, against 7 °/s on the
-  left — which is why no stance-foot measure is reported.
+- **The trained participant's right-foot sensor moves while they stand still**: 17 °/s RMS in the
+  stiller quiet span, against 2 °/s for the left foot. Its strap was loose or the foot moved, and its
+  `sensor_check.csv` marks it. The novice's right foot is the stillest sensor of that recording. No
+  stance-foot measure is reported.
+- **The exported elbow angles are not usable, and the shoulder angles only roughly.** In Tai Chi's
+  arm positions the elbow's Euler angles pass through the decomposition's singularity: its
+  ab/adduction reaches ±77–88°, and its flexion, unwrapped, runs to −743° and −1060° in
+  `kinematic_variables_50hz.csv`. No Euler ordering fixes this, because the upper-arm sensor, on soft
+  tissue, misses much of the humerus's axial rotation. The shoulder's components mix as the chest and
+  upper-arm headings drift apart (next point). No metric uses either. The Kinematics check shows the
+  arms as shoulder elevation and elbow bend instead: the angle between the upper arm and the trunk's
+  axis, and between the upper arm and the forearm.
+- **The upper-body sensors' headings drift**, each by its own amount. Between the start and the end
+  of the recordings they drift by up to 115°, against at most 44° for the legs, so two of them end up
+  as much as 130° apart. Angles between arm segments drift with them. Re-running the orientation
+  filter with the quiet-standing bias should cut this.
 - **Sequence turns cover the moving passages only**. The still spans at the start and end, and the
   single-leg passage in the middle (where the chest barely turns), produce no turn, by design.
 - **Segment lengths are nominal.** No anthropometric scaling or functional joint-axis calibration is
-  applied, so joint angles carry soft-tissue and mounting error.
+  applied, so joint angles carry soft-tissue and mounting error. The knees' flexion axes lie 28–42°
+  from the assumed one, so part of the knee flexion shows up in the other two components.
 - [docs/Implementation_strategy.md](docs/Implementation_strategy.md) describes a largest-Lyapunov-exponent analysis that is planned but not
   implemented in code.
 
