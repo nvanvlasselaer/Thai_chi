@@ -19,7 +19,7 @@ if __package__ in (None, ""):
 
 from analysis import recordings
 from analysis.data_io import load_orientation_npz
-from analysis.tools.skeleton import CONNECTIONS, SEGMENTS
+from analysis.skeleton import CONNECTIONS, pose
 
 
 # ----------------------------------------------------------------------
@@ -43,28 +43,8 @@ def load_first_frame(npz_path):
 
 
 def compute_positions_and_rotations_first_frame(quats):
-    """
-    Forward kinematics for a single frame.
-    Returns:
-        positions: dict joint -> xyz
-        rotations: dict joint -> world Rotation
-    """
-    positions = {"pelvis_center": np.zeros(3)}
-    rotations = {"pelvis_center": Rotation.identity()}
-
-    for joint_name, (parent, sensor, neutral_vec) in SEGMENTS.items():
-        parent_rot = rotations[parent]
-
-        if sensor is not None and sensor in quats:
-            local_rot = quat_wxyz_to_rot(quats[sensor])
-        else:
-            local_rot = Rotation.identity()
-
-        world_rot = parent_rot * local_rot
-        positions[joint_name] = positions[parent] + world_rot.apply(neutral_vec)
-        rotations[joint_name] = world_rot
-
-    return positions, rotations
+    """Forward kinematics for a single frame (:func:`analysis.skeleton.pose`)."""
+    return pose({sensor: quat_wxyz_to_rot(q) for sensor, q in quats.items()})
 
 
 def draw_local_axes(ax, origin, rot, scale=0.08, lw=2.0):

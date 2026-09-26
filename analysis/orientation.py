@@ -151,8 +151,20 @@ def mounting_matrix(sensor_name: str) -> np.ndarray:
     """Rotation from a sensor's own axes to the common body frame.
 
     The sensors are mounted in different orientations on the body, so each is
-    rotated into one frame before anything is compared: x = forward,
-    y = right, z = downward.
+    rotated into one frame before anything is compared: x = right
+    (mediolateral, the flexion-extension axis), y = forward
+    (anteroposterior), z = up.  Up is where gravity puts it: in the neutral
+    pose every accelerometer reads mostly +z.  For the leg sensors the signs
+    of x and y are fixed by what the hip and knee can do: in both recordings
+    raised thighs always point to +y and bent knees always swing the shank to
+    -y (see :mod:`analysis.kinematics_check`).  The trunk and arm sensors have
+    no such check; a functional-calibration trial would give one.
+
+    The rotation also assumes how each sensor sits about its segment's long
+    axis, which the neutral pose cannot show.  The knees' flexion axes come
+    out 28-42 deg from x, turned opposite ways on the two legs, consistent
+    with the shank sensors on the flat anteromedial face of the tibia rather
+    than its front, or with the feet turned out in the neutral pose.
     """
     if sensor_name in ["chestbone", "lulna", "rulna"]:
         return np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]])

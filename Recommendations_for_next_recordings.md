@@ -20,13 +20,22 @@ What checking the metrics against these two recordings showed the protocol needs
   stillest 10 s of each (breathing moves the sternum sensor at 0.13–0.33 Hz, so a 2 s window is too
   short), and it is large: about 6.6 °/s on the lumbar sensor and 15 °/s on the chest. The same spans
   would let the orientation filter itself be re-run with a better bias, which should cut the yaw drift.
-- **Record the functional calibration** in item 4 before anything else: the axes were only worked out
-  from indirect evidence (x = mediolateral, y = anteroposterior); the signs of each are still unknown.
+- **Record the functional calibration** in item 4 before anything else. The axes were worked out from
+  indirect evidence: x = mediolateral and y = anteroposterior. For the leg sensors the signs follow
+  from what the hip and knee can do (x right, y forward); for the trunk and arm sensors they are still
+  unknown. The calibration would also show how each sensor sits about its segment's long axis, which
+  the neutral pose cannot: the knees' flexion axes come out 28–42° from where the mounting expects
+  them.
+- **Photograph each sensor on its segment.** The analysis assumes one mounting for every participant.
+  The knee flexion axes are turned opposite ways on the two legs, which suggests the shank sensors sit
+  on the flat inner face of the tibia rather than its front; a photograph would settle it.
 - **Hold the quiet and single-leg stances as instructed postures**, not only as parts of the form:
   the only whole-body quiet spans now are ~15–25 s before and after the form, and the trunk never
   settles after a rotation within the form, so there is no stabilization phase to measure there.
-- **Check the right-foot sensor.** Its gyroscope reads 16–21 °/s RMS while the participant stands
-  still, against 7 °/s on the left foot, which rules out any stance-foot measure.
+- **Check the sensors on the first recording of a session**, with stage 1's sensor check and the
+  dashboard's Kinematics check page, while a loose or misplaced sensor can still be fixed. Here the
+  trained participant's right foot moved at 17 °/s RMS in the stiller quiet span, against 2 °/s for
+  the left foot: its strap was loose, or the foot moved.
 - **Note whether the participants follow a video.** Both did here, with a near-constant 3.4 s offset,
   so tempo was paced externally; self-paced performance would make duration a measure of the
   participant rather than of the video.

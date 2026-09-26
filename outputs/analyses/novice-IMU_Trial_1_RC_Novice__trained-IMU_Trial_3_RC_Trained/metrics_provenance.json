@@ -1,5 +1,5 @@
 {
-  "computed_utc": "2026-09-26T02:03:15+00:00",
+  "computed_utc": "2026-09-26T15:38:15+00:00",
   "analysis": "novice-IMU_Trial_1_RC_Novice__trained-IMU_Trial_3_RC_Trained",
   "recordings": {
     "Novice": {
@@ -16,7 +16,7 @@
     }
   },
   "session_name": null,
-  "session_digest": "085249ccfa7553e0",
+  "session_digest": "f4f52f0809043d0e",
   "metrics_version": 2,
   "ignore_high_pass_filter": false,
   "files": [

@@ -1,9 +1,19 @@
-"""Stick-figure skeleton shared by the animation and single-frame viewers.
+"""Stick-figure skeleton: the segments, and a pose from the segment orientations.
 
 Each joint is placed at its parent plus a neutral-pose offset (metres) rotated
 by the orientation of the sensor that drives the segment.  Segment lengths are
-nominal; no anthropometric scaling is applied.
+nominal; no anthropometric scaling is applied.  The offsets use the body frame
+of :func:`analysis.orientation.mounting_matrix`: x = right (mediolateral),
+y = forward (anteroposterior), z = up.
+
+Used by the kinematics check of the dashboard and by the standalone viewers in
+:mod:`analysis.tools`.
 """
+
+from __future__ import annotations
+
+import numpy as np
+from scipy.spatial.transform import Rotation
 
 SEGMENTS = {
     # joint:          (parent,          sensor,      neutral offset [x, y, z])
@@ -75,3 +85,23 @@ def _verify_topological_order(segments: dict) -> None:
 
 
 _verify_topological_order(SEGMENTS)
+
+
+def pose(rotations: dict[str, Rotation]) -> tuple[dict[str, np.ndarray], dict[str, Rotation]]:
+    """Joint positions and segment rotations for one frame.
+
+    ``rotations`` holds each sensor's body-frame orientation.  That is already
+    the segment's orientation relative to the neutral pose, in the one body
+    frame every sensor is expressed in, so it is used as it is rather than
+    composed with the parent's -- composing is right only at the neutral pose.
+    A segment with no sensor (the shoulders) turns with its parent.
+    """
+    positions = {"pelvis_center": np.zeros(3)}
+    world = {"pelvis_center": Rotation.identity()}
+    for joint, (parent, sensor, offset) in SEGMENTS.items():
+        rotation = rotations.get(sensor) if sensor is not None else None
+        if rotation is None:
+            rotation = world[parent]
+        positions[joint] = positions[parent] + rotation.apply(offset)
+        world[joint] = rotation
+    return positions, world

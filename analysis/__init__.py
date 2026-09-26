@@ -10,6 +10,8 @@ modules listed above it, so any stage can be used without the ones after it.
     data_io             Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
     kinematics          segment and joint kinematics of one recording; gyroscope bias and vertical reference
     gravity             tilt, turning rate, gravity-free sway and leg lift, from the vertical in each segment
+    skeleton            the stick figure: its segments, and a pose from their orientations
+    kinematics_check    stage 1 checked: where each sensor sits, joint angles, moments to compare with the video
     alignment           whole-recording DTW map between the novice and trained clocks; event matching
     detection           motion-driven event detection and novice/trained pairing through the alignment
     detection_v1        the original fixed-window detectors, kept for reproducibility

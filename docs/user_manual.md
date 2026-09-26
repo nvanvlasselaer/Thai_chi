@@ -14,7 +14,7 @@ Start the app from the repository root:
 python3 app.py
 ```
 
-A browser tab opens at http://127.0.0.1:8051. The header has three pages — **Pipeline**, **Event editor** and **Results** — and on the right a status line for whatever is running in the background. Each page has its own address (`/pipeline`, `/editor`, `/results`), so a refresh stays where you are.
+A browser tab opens at http://127.0.0.1:8051. The header has four pages — **Pipeline**, **Kinematics check**, **Event editor** and **Results** — and on the right a status line for whatever is running in the background. Each page has its own address (`/pipeline`, `/check`, `/editor`, `/results`), so a refresh stays where you are.
 
 ### The Pipeline page
 
@@ -23,7 +23,7 @@ This is where the analysis starts. Each stage has a card saying whether it is **
 | card | what it does |
 | --- | --- |
 | Recordings | which recordings to analyse — see [Choosing recordings](#choosing-recordings) below |
-| 1 · Orientation and kinematics | runs the orientation filter on every sensor of each selected recording and writes its orientation cache, 50 Hz joint angles, sensor inventory and orientation validation figure. About 10 s per recording, done once: every selection that uses the recording reuses it, until the file itself changes |
+| 1 · Orientation and kinematics | runs the orientation filter on every sensor of each selected recording and writes its orientation cache, 50 Hz joint angles, sensor inventory, orientation validation figure and sensor check. About 10 s per recording, done once: every selection that uses the recording reuses it, until the file itself changes. The card says which sensors, if any, need a look; **Check sensors and kinematics** opens the [Kinematics check](#the-kinematics-check-page) page |
 | 2 · Recordings loaded | loads the selected recordings into the app, for the editor. A few seconds, and it happens by itself when the server starts once stage 1 has been run |
 | 3 · Event windows | the session you edit in the event editor — one per selection. **New session** starts over from the source chosen beside it — the v2 detectors or the v1 detectors (fixed 8 s windows, to reproduce earlier windows) — and keeps the session it replaces in `_previous` (see [§4](#saving-and-loading-sessions)). A session saved by an older version is migrated when it is opened; the original is kept as `sessions/pre-schema-2-<name>.json` |
 | 4 · Metrics and figures | recalculates everything from the session. The card says **out of date** as soon as a window, a setting or a recording file has changed since the last recalculation |
@@ -39,6 +39,38 @@ Pick a recording for each role, or clear one (×) to analyse a single recording,
 Each selection keeps its own session, named sessions, metrics and figures, so switching back later returns to the curation exactly as you left it. With one recording selected, the editor shows one graph and every event has one window; the tables and figures hold that recording alone.
 
 Every output says where it came from: the folder is named after the recordings, `analysis.json` and each recording's `recording.json` record the exact file (name, size, SHA-256), every table has a `recording` column, and every figure names its files underneath.
+
+### The Kinematics check page
+
+Open it after stage 1, before placing any event: it shows whether each sensor sits where the analysis assumes, and whether the movement it reconstructs looks like the person in the video. Choose the recording at the top.
+
+**The sensor table** is the recording's `sensor_check.csv`. Rows marked **check** are shaded, with the reason in *notes*:
+
+| column | what it says | marked **check** when |
+| --- | --- | --- |
+| mounting tilt | how far the axis the mounting assumes is vertical sits from vertical in the neutral pose. The trunk sensors sit 13–18° off on the lordosis and the sternum, the feet ~40° on the slope of the instep | over 45°: the sensor is rotated or turned over on its segment |
+| \|g\| at rest | the accelerometer's reading in the neutral pose | not 1 g ± 0.05 |
+| gyro bias | what the gyroscope reads while nothing moves; it is subtracted from every angular speed | — |
+| still | the sensor's angular speed in the stiller of the two quiet standing spans | more than 3 robust SDs above the median sensor: a loose strap, or that segment moved |
+| knee axis off x | how far each knee's flexion axis lies from the one assumed | over 45° (20–45° is a note: part of the knee flexion shows up in the other components) |
+| moves the allowed way | of the time a thigh is raised or a knee bent, how often the thigh points forward and the shank swings back | under 50 %: the sensor is turned around on its segment, or left and right are swapped — which the neutral pose cannot show |
+| missing | missing samples | any |
+
+Nothing on this page changes the analysis: a sensor marked **check** is for you to look at. If one really is misplaced, the metrics that use it cannot be trusted: the thigh and shank sensors for the single-leg stances, the chest and lumbar sensors for every family.
+
+**The stick figure** shows the recording at the time on the slider: left segments blue, right red, the grey outline the neutral pose, and a head drawn on the chest's axis (there is no head sensor). Drag it to rotate; the **view** buttons switch between a diagonal view and straight front, side and top views, which show angles without perspective. **Jump to a moment** goes to the moments where a misplaced sensor shows most:
+
+- *neutral pose*: the figure stands upright, arms hanging;
+- *deepest left / right knee bend* and *highest left / right foot lift*: the figure's leg on that side, and only that one, bends or rises, and in the video it must be the person's leg on the same side. If it is their other leg, the left and right leg sensors are swapped;
+- *largest trunk turn each way*: the chest turns on the pelvis.
+
+Compare each with the video. **De-drift headings** (on by default) takes out each sensor's slow turn about the vertical: without a magnetometer every sensor's heading drifts on its own (the arm sensors by up to 115° over these recordings), and without the correction the figure slowly twists apart. It also takes out a slow turn of the whole body, so the figure always faces roughly forward. **Sensor axes** draws each sensor's x (red), y (green) and z (blue).
+
+**The joint angles** beside it are grouped by joint, with left and right overlaid, the neutral pose shaded green and the quiet standing spans grey. Click anywhere in them to move the figure there. Every angle is measured from the neutral pose. For the legs, the panel titles say which sign is which: hip flexion positive, knee flexion negative, ankle dorsiflexion positive, and hip abduction positive (the right side mirrored so both read the same way). The arms are shown as **shoulder elevation** (the upper arm's angle from the trunk's axis) and **elbow bend** (the angle between upper arm and forearm), which ignore rotation about each segment's own axis. The elbow's Euler angles in the 50 Hz export pass through their singularity in Tai Chi's arm positions and are not usable.
+
+What to look for: both knees flexing the same sign, never much past 0 the other way; hip flexion to ~90° when a leg is lifted; similar ranges on the two sides for a symmetric form; no slow drift in the trunk and pelvis angles; shoulder elevation near 0 while the arms hang.
+
+The same table and panels are available outside the dashboard: `python3 analysis/tools/plot_kinematics.py [--role Trained] [--save file.png]`.
 
 ### The Results page
 

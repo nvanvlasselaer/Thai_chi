@@ -247,7 +247,8 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
         kins = {label: trials[label].kin for label in labels}
         fs_of = {label: trials[label].fs for label in labels}
         if len(trunk_metrics) > 0:
-            make_trunk_traceability_figure(kins, fs_of, trunk_metrics, trunk_windows, sources, folder)
+            make_trunk_traceability_figure(kins, fs_of, trunk_metrics, trunk_windows, sources, folder,
+                                           lag_pad_s=lag_pad_s)
             written.append("trunk_traceability_figure.png")
         if len(knee_metrics) > 0:
             make_knee_flexion_overview_figure(kins, fs_of, knee_events, signals, sources, folder)

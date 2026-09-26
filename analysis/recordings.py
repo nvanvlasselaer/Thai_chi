@@ -113,11 +113,12 @@ class Recording:
     kinematics_path = property(lambda self: self.output_dir / "kinematic_variables_50hz.csv")
     inventory_path = property(lambda self: self.output_dir / "sensor_inventory.csv")
     validation_figure_path = property(lambda self: self.output_dir / "orientation_validation.png")
+    sensor_check_path = property(lambda self: self.output_dir / "sensor_check.csv")
     manifest_path = property(lambda self: self.output_dir / "recording.json")
 
     def outputs(self) -> list[Path]:
         return [self.orientation_path, self.kinematics_path, self.inventory_path,
-                self.validation_figure_path, self.manifest_path]
+                self.validation_figure_path, self.sensor_check_path, self.manifest_path]
 
     def sha256(self) -> str:
         return _sha256(self.path, self.size, self.mtime_ns)

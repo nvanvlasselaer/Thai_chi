@@ -1,0 +1,15 @@
+sensor,segment,mounting_tilt_deg,gravity_at_rest_g,gyro_bias_dps,still_rms_dps,still_robust_z,knee,knee_flexion_axis_offset_deg,allowed_direction_pct,missing_values,status,notes
+chestbone,Thorax,13.3,1.01,14.96,2.41,-0.5,,,,0,ok,
+lumbar,Pelvis/Lower Trunk Proxy,17.5,0.996,6.63,1.27,-1.3,,,,0,ok,
+lthigh,Left Thigh,9.8,1.019,6.05,3.97,0.7,,,100.0,0,ok,
+rthigh,Right Thigh,11.6,1.02,3.88,2.12,-0.7,,,100.0,0,ok,
+ltibia,Left Shank,8.4,1.007,8.45,3.61,0.4,left knee,36.6,100.0,0,ok,left knee flexion axis 37 deg from x: part of the flexion shows in the other components (a functional calibration would remove it)
+rtibia,Right Shank,5.1,1.017,8.28,1.79,-0.9,right knee,42.0,100.0,0,ok,right knee flexion axis 42 deg from x: part of the flexion shows in the other components (a functional calibration would remove it)
+lfoot,Left Foot,40.5,0.98,10.22,1.1,-1.4,,,,0,ok,
+rfoot,Right Foot,40.8,0.973,7.56,0.85,-1.6,,,,0,ok,
+lhumerus,Left Upper Arm,8.1,1.01,10.81,2.91,-0.1,,,,0,ok,
+rhumerus,Right Upper Arm,5.1,1.006,9.62,3.21,0.1,,,,0,ok,
+lulna,Left Forearm,20.4,0.999,18.18,3.18,0.1,,,,0,ok,
+rulna,Right Forearm,21.0,1.005,12.82,3.72,0.5,,,,0,ok,
+lhand,Left Hand,20.9,1.007,17.32,4.0,0.7,,,,0,ok,
+rhand,Right Hand,24.1,0.992,9.85,4.1,0.8,,,,0,ok,

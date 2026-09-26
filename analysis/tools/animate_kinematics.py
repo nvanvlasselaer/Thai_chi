@@ -19,7 +19,7 @@ if __package__ in (None, ""):
 
 from analysis import recordings
 from analysis.data_io import load_orientation_npz
-from analysis.tools.skeleton import CONNECTIONS, SEGMENTS
+from analysis.skeleton import CONNECTIONS, SEGMENTS, pose
 
 
 # ----------------------------------------------------------------------
@@ -97,65 +97,10 @@ def load_kinematics(npz_path, filter_hp=False, hp_cutoff=0.05, hp_order=4):
 # ----------------------------------------------------------------------
 # Forward kinematics
 # ----------------------------------------------------------------------
-# def compute_joint_positions(quats: dict, frame_idx: int) -> dict:
-#     """
-#     Compute joint world positions for a single frame using accumulated rotations.
-
-#     For each joint:
-#         world_rot = parent_world_rot * local_rot
-#         position  = parent_position + world_rot.apply(neutral_vector)
-#     """
-#     positions = {"pelvis_center": np.zeros(3)}
-#     rotations = {"pelvis_center": Rotation.identity()}
-
-#     for joint_name, (parent, sensor, neutral_vec) in SEGMENTS.items():
-#         parent_rot = rotations[parent]
-
-#         if sensor is not None:
-#             q_wxyz = quats[sensor][frame_idx]
-#             # Convert wxyz → xyzw for scipy
-#             q_xyzw = [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]
-#             local_rot = Rotation.from_quat(q_xyzw)
-#         else:
-#             local_rot = Rotation.identity()
-
-#         world_rot = parent_rot * local_rot
-#         rotated_vec = world_rot.apply(neutral_vec)
-#         positions[joint_name] = positions[parent] + rotated_vec
-#         rotations[joint_name] = world_rot
-
-#     return positions
-
-
 def compute_joint_positions(quats: dict, frame_idx: int) -> tuple:
-    """
-    Compute joint world positions for a single frame
-    IMU's output GLOBAL orientation in world frame, so we can use it directly to compute the position of each joint in the world frame.
-    
-    Returns
-    -------
-    positions : dict {joint_name: (3,) array}
-    rotations : dict {joint_name: Rotation object}
-    """
-    positions = {"pelvis_center": np.zeros(3)}
-    rotations = {"pelvis_center": Rotation.identity()}
-
-    for joint_name, (parent, sensor, neutral_vec) in SEGMENTS.items():
-        parent_rot = rotations[parent]
-
-        if sensor is not None:
-            q_wxyz = quats[sensor][frame_idx]
-            # Convert wxyz → xyzw for scipy
-            q_xyzw = [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]
-            world_rot = Rotation.from_quat(q_xyzw)
-        else:
-            world_rot = parent_rot
-
-        rotated_vec = world_rot.apply(neutral_vec)
-        positions[joint_name] = positions[parent] + rotated_vec
-        rotations[joint_name] = world_rot
-
-    return positions, rotations
+    """Joint positions and segment rotations for one frame (:func:`analysis.skeleton.pose`)."""
+    rotations = {sensor: Rotation.from_quat(q[frame_idx][[1, 2, 3, 0]]) for sensor, q in quats.items()}
+    return pose(rotations)
 
 # ----------------------------------------------------------------------
 # Animation
