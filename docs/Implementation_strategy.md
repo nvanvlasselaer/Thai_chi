@@ -1,3 +1,11 @@
+> **Not applicable to the current recordings.** The plan below asks for at least 200 cycles of a
+> repeated movement, and largest-Lyapunov estimates depend on series length (detecting condition
+> effects needed more than 150 strides in Bruijn et al., 2009). The present recordings are one
+> performance of a form in which every movement occurs once — about 28 chest turns, none of them a
+> repetition — and the form is not a stationary cyclic task. It is kept for a dedicated long cyclic
+> recording (see Recommendations_for_next_recordings.md); for short, non-stationary data, recurrence
+> quantification analysis (Webber & Zbilut, 1994; Riley et al., 1999) is the more appropriate family.
+
 Implementation of the Rosenstein algorithm for calculating the largest Lyapunov exponent (LyE) from IMU data, 
 tailored specifically for Tai Chi movements. 
 The goal is to quantify **local dynamic stability** – how well a practitioner maintains consistent, controlled movement despite continuous perturbations.

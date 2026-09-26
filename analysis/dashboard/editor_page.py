@@ -7,10 +7,11 @@ scrollable, zoomable timeline, lets the boundaries be dragged into place, and
 recalculates the metrics through the pipeline's own functions.
 
 Four boundaries per event are editable: the start and end of the movement, and
-the start and end of the stabilization period that follows it.  The subplot
-showing the yaw-velocity envelope also draws the threshold the detector used, so
-a boundary can be judged against the signal that produced it rather than taken
-on trust.
+the start and end of the stabilization period that follows it.  Each subplot
+draws the threshold its detector used, so a boundary can be judged against the
+signal that produced it rather than taken on trust, and the selected event's
+partner in the other recording is outlined where the whole-recording alignment
+puts it, so a pair that is not the same movement shows at a glance.
 
 The recordings come from the shared workspace (:mod:`analysis.dashboard.state`),
 which the Pipeline page loads; until it has, the page shows a placeholder.  With
@@ -26,13 +27,14 @@ from dash import Dash, Input, Output, Patch, State, ctx, dash_table, dcc, html, 
 from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
-from analysis import config, detection, recordings, sessions
+from analysis import alignment, config, detection, recordings, sessions
 from analysis.config import TRIALS
+from analysis.dashboard.results_page import output_url
 from analysis.dashboard.state import WORK_LOCK, workspace
 from analysis.kinematics import LoadedTrial
 from analysis.recompute import recompute
 from analysis.signals import lowpass_signal, resample_filtered_full, sec_to_idx
-from analysis.validation import LOW_CONFIDENCE_RATIO, Issue, validate_session
+from analysis.validation import MIN_PAIR_OVERLAP, Issue, pair_overlap, validate_session
 
 DISPLAY_FS = 50.0
 EVENT_COLOUR = "#f2b134"
@@ -41,9 +43,10 @@ CONTEXT_COLOUR = "#9aa0a6"
 ROW_TITLES = [
     "trunk-pelvis yaw (deg)",
     "yaw speed envelope (deg/s)  -  dotted: onset/offset floor",
-    "lumbar + chest angular velocity (deg/s)  -  dotted: quiet baseline",
-    "knee flexion |x| (deg)  -  dashed: monopodal threshold",
-    "chest and pelvis yaw (deg)  -  dashed: minimum turn for a sequence segment",
+    "lumbar + chest angular speed, gyro bias removed (deg/s)  -  dotted: quiet baseline, dashed: median",
+    "leg lift (thigh lengths): + left foot up, - right foot up  -  dashed: minimum lift",
+    "knee flexion |x| (deg)  -  dashed: legacy knee-threshold method",
+    "chest and pelvis yaw (deg)  -  dashed: minimum turn from neutral",
 ]
 N_ROWS = len(ROW_TITLES)
 HIDDEN = {"display": "none"}
@@ -95,6 +98,7 @@ def build_display(loaded: LoadedTrial) -> dict:
     trunk_diag = detection.trunk_yaw_envelope(kin, fs)
     stab_diag = detection.combined_omega(kin, fs)
     segment_diag = detection.chest_yaw_signals(kin, fs)
+    lift_diag = detection.lift_signal(kin, fs)
 
     return {
         "time": _series(time_s),
@@ -108,6 +112,8 @@ def build_display(loaded: LoadedTrial) -> dict:
         "chest_omega": _series(resample(kin.omega_mag["chestbone"])),
         "combined_omega": _series(resample(stab_diag.combined_omega_dps)),
         "omega_baseline": float(stab_diag.baseline_dps),
+        "omega_median": float(stab_diag.baseline_dps + stab_diag.scale_dps),
+        "lift": _series(resample(lift_diag.lift_index)),
         "left_knee": _series(resample(np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
         "right_knee": _series(resample(np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
         "duration_s": loaded.duration_s,
@@ -140,13 +146,14 @@ def base_figure(label: str, display: dict) -> go.Figure:
     add(display["lumbar_omega"], "lumbar w", 3, "#2a9d8f", width=0.9)
     add(display["chest_omega"], "chest w", 3, "#8ecae6", width=0.9)
     add(display["combined_omega"], "lumbar + chest w", 3, "#264653", width=1.3)
-    add(display["left_knee"], "left knee", 4, "#d1495b", width=1.1)
-    add(display["right_knee"], "right knee", 4, "#f4a261", width=1.1)
-    add(display["chest_yaw"], "chest yaw", 5, "#1f77b4", width=1.3)
-    add(display["pelvis_yaw"], "pelvis yaw", 5, "#8ecae6", width=1.0)
+    add(display["lift"], "leg lift", 4, "#444444", width=1.2)
+    add(display["left_knee"], "left knee", 5, "#d1495b", width=1.1)
+    add(display["right_knee"], "right knee", 5, "#f4a261", width=1.1)
+    add(display["chest_yaw"], "chest yaw", 6, "#1f77b4", width=1.3)
+    add(display["pelvis_yaw"], "pelvis yaw", 6, "#8ecae6", width=1.0)
 
     figure.update_layout(
-        height=920,
+        height=1080,
         margin={"l": 60, "r": 20, "t": 40, "b": 40},
         dragmode="pan",
         hovermode="x unified",
@@ -207,20 +214,57 @@ def _threshold_line(y: float, row: int, colour: str, dash: str) -> dict:
     }
 
 
-def threshold_lines(display: dict, knee_threshold: float, min_lobe_deg: float) -> list[dict]:
+def threshold_lines(display: dict, knee_threshold: float, min_lobe_deg: float,
+                    lift_min_peak: float) -> list[dict]:
     """The thresholds the detectors used, so a boundary stays explainable."""
     return [
         _threshold_line(display["envelope_floor"], 2, "#7b4173", "dot"),
         _threshold_line(display["omega_baseline"], 3, "#264653", "dot"),
-        _threshold_line(knee_threshold, 4, "#444444", "dash"),
-        _threshold_line(0.0, 5, "#888888", "dot"),
-        _threshold_line(min_lobe_deg, 5, "#444444", "dash"),
-        _threshold_line(-min_lobe_deg, 5, "#444444", "dash"),
+        _threshold_line(display["omega_median"], 3, "#264653", "dash"),
+        _threshold_line(0.0, 4, "#888888", "dot"),
+        _threshold_line(lift_min_peak, 4, "#444444", "dash"),
+        _threshold_line(-lift_min_peak, 4, "#444444", "dash"),
+        _threshold_line(knee_threshold, 5, "#444444", "dash"),
+        _threshold_line(0.0, 6, "#888888", "dot"),
+        _threshold_line(min_lobe_deg, 6, "#444444", "dash"),
+        _threshold_line(-min_lobe_deg, 6, "#444444", "dash"),
     ]
 
 
+def _partner_outline(x0: float, x1: float, same_movement: bool) -> dict:
+    """Where the selected event's other window lands on this recording's clock."""
+    colour = "#2a9d8f" if same_movement else "#c0392b"
+    return {
+        "type": "rect", "xref": DRIVING_XREF, "yref": "paper", "x0": x0, "x1": x1, "y0": 0, "y1": 1,
+        "fillcolor": "rgba(0,0,0,0)", "line": {"width": 2, "color": colour, "dash": "dash"},
+        "editable": False, "layer": "above",
+    }
+
+
+def partner_positions(event: dict | None, trials: dict[str, LoadedTrial]) -> dict[str, tuple[float, float, bool]]:
+    """Per recording, the selected event's *other* window carried onto its clock.
+
+    Returns ``{label: (x0, x1, same_movement)}`` for the graph each outline goes
+    on; empty for an unpaired event or a single recording.
+    """
+    aligned = alignment.for_trials(trials)
+    windows = (event or {}).get("windows", {})
+    if aligned is None or not all(label in windows for label in TRIALS):
+        return {}
+    overlap = pair_overlap(event, trials)
+    same = overlap is not None and overlap[0] >= MIN_PAIR_OVERLAP
+    out = {}
+    for here, other in (("Novice", "Trained"), ("Trained", "Novice")):
+        window, fs = windows[other], trials[other].fs
+        x0 = float(aligned.map(window["event_start"] / fs, other, here))
+        x1 = float(aligned.map(window["event_end"] / fs, other, here))
+        out[here] = (x0, x1, same)
+    return out
+
+
 def build_shapes(session: dict, selection: dict, label: str, fs: float,
-                 display: dict, knee_threshold: float, min_lobe_deg: float) -> list[dict]:
+                 display: dict, knee_threshold: float, min_lobe_deg: float, lift_min_peak: float,
+                 partner: tuple[float, float, bool] | None = None) -> list[dict]:
     """Two editable rects for the selected event, then references and context."""
     selected = find_event(session, selection)
     shapes: list[dict] = []
@@ -241,7 +285,9 @@ def build_shapes(session: dict, selection: dict, label: str, fs: float,
         shapes.append(_rect(-1, -1, STAB_COLOUR, False, 0.0))
 
     # Appended after the editable pair so their indices 0 and 1 stay fixed.
-    shapes += threshold_lines(display, knee_threshold, min_lobe_deg)
+    shapes += threshold_lines(display, knee_threshold, min_lobe_deg, lift_min_peak)
+    if partner is not None:
+        shapes.append(_partner_outline(*partner))
 
     selected_id = selection.get("event_id")
     for event in all_events(session, selection.get("family", "trunk")):
@@ -323,12 +369,13 @@ def decode_relayout(relayout: dict | None) -> dict[str, tuple[float, float]]:
 
 EVENT_DETAIL = {
     "trunk": lambda event: "trunk rotation",
-    "knee": lambda event: f"{event['flexed_leg'][:1]}-knee flexed",
-    "smooth": lambda event: "sequence part",
+    "knee": lambda event: f"{event.get('lifted_leg', '?')[:1]} leg up",
+    "smooth": lambda event: f"turn {'+' if event.get('direction', 0) > 0 else '-'}",
 }
 
 
-def event_table_rows(session: dict, family: str, trials: dict[str, LoadedTrial]) -> list[dict]:
+def event_table_rows(session: dict, family: str, trials: dict[str, LoadedTrial],
+                     low_confidence_z: float = 1.0) -> list[dict]:
     """One row per event, for whichever family the open tab shows.
 
     Every family may now be single-sided -- a stance found in one recording
@@ -351,25 +398,29 @@ def event_table_rows(session: dict, family: str, trials: dict[str, LoadedTrial])
         ref = windows.get(present[0]) if present else None
         dur = (f"{(ref['event_end']-ref['event_start'])/trials[present[0]].fs:.1f}s"
                if ref else "--")
+        overlap = pair_overlap(event, trials)
         rows.append({
             "event_id": event["event_id"],
             "detail": detail_of(event),
             "novice": span("Novice"),
             "trained": span("Trained"),
             "dur": dur,
-            "flags": event_flags(event),
+            "overlap": f"{overlap[0]:.0%}" if overlap is not None else "--",
+            "flags": event_flags(event, overlap, low_confidence_z),
         })
     return rows
 
 
-def event_flags(event: dict) -> str:
-    """Short markers: edited, and low-confidence stabilization."""
+def event_flags(event: dict, overlap: tuple[float, float] | None, low_confidence_z: float) -> str:
+    """Short markers: edited, mismatched pair, low-confidence stabilization."""
     windows = event["windows"].values() if "windows" in event else [event]
     flags = []
     if any("manual" in (w.get("source") or {}).values() for w in windows):
         flags.append("edited")
-    ratios = [w.get("stab_quiet_ratio") for w in windows]
-    if any(r is not None and r > LOW_CONFIDENCE_RATIO for r in ratios):
+    if overlap is not None and overlap[0] < MIN_PAIR_OVERLAP:
+        flags.append("confirmed" if event.get("pair_confirmed") else "mismatch")
+    scores = [w.get("stab_quiet_z") for w in windows]
+    if any(z is not None and z > low_confidence_z for z in scores):
         flags.append("unsettled")
     if not event.get("enabled", True):
         flags.append("off")
@@ -397,7 +448,7 @@ def layout() -> html.Div:
     def number(component_id: str, label_text: str):
         return html.Div([
             html.Label(label_text, style={"fontSize": "11px", "color": "#555"}),
-            dcc.Input(id=component_id, type="number", step=0.05, debounce=True,
+            dcc.Input(id=component_id, type="number", step=0.01, debounce=True,
                       style={"width": "100%", "fontSize": "12px", "boxSizing": "border-box"}),
         ], style={"marginBottom": "4px"})
 
@@ -450,31 +501,39 @@ def layout() -> html.Div:
             detector_input("p-n-events", "number of events", defaults.n_events, 1),
         ]),
         html.Div(id="knee-params", children=[
+            html.Label("method", style={"fontSize": "11px", "color": "#555"}),
+            dcc.Dropdown(
+                id="p-knee-method",
+                options=[{"label": "Leg lift (one foot higher)", "value": "lift"},
+                         {"label": "Knee flexion threshold (v1)", "value": "knee_threshold"}],
+                value=knee_defaults.method, clearable=False,
+                style={"fontSize": "11px", "marginBottom": "4px"},
+            ),
+            detector_input("p-lift-peak", "min lift (thigh lengths)", knee_defaults.lift_min_peak, 0.05),
+            detector_input("p-lift-rel", "onset threshold (fraction of peak lift)",
+                           knee_defaults.lift_rel_threshold, 0.01),
+            detector_input("p-lift-dur", "min support duration (s)", knee_defaults.lift_min_duration_s, 0.1),
+            html.Div("Knee-threshold method only:", style={"fontSize": "10px", "color": "#888", "marginTop": "4px"}),
             detector_input("p-knee-thr", "knee flexion threshold (deg)", knee_defaults.threshold_deg, 1),
             detector_input("p-knee-dur", "min event duration (s)", knee_defaults.min_duration_s, 0.1),
             detector_input("p-knee-gap", "merge gap (s)", knee_defaults.merge_gap_s, 0.05),
         ]),
         html.Div(id="smooth-params", children=[
-            html.Label("segment unit", style={"fontSize": "11px", "color": "#555"}),
-            dcc.Dropdown(
-                id="p-smooth-unit",
-                options=[{"label": "Full back-and-forth cycle", "value": "full"},
-                         {"label": "Half cycle (one excursion)", "value": "half"}],
-                value="half" if segment_defaults.half_cycles else "full",
-                clearable=False, style={"fontSize": "11px", "marginBottom": "4px"},
-            ),
+            html.Div("Each turn runs from one turning point of the chest yaw to the next.",
+                     style={"fontSize": "10px", "color": "#888", "marginBottom": "4px"}),
             detector_input("p-smooth-lobe", "min turn from neutral (deg)", segment_defaults.min_lobe_deg, 1),
-            detector_input("p-smooth-sep", "min turn separation (s)", segment_defaults.min_lobe_separation_s, 0.1),
-            detector_input("p-smooth-exc", "min segment excursion (deg)", segment_defaults.min_excursion_deg, 1),
-            detector_input("p-smooth-min-dur", "min segment duration (s)", segment_defaults.min_duration_s, 0.5),
-            detector_input("p-smooth-max-dur", "max segment duration (s)", segment_defaults.max_duration_s, 1),
+            detector_input("p-smooth-sep", "min turning-point separation (s)",
+                           segment_defaults.min_lobe_separation_s, 0.1),
+            detector_input("p-smooth-exc", "min turn excursion (deg)", segment_defaults.min_excursion_deg, 1),
+            detector_input("p-smooth-min-dur", "min turn duration (s)", segment_defaults.min_duration_s, 0.5),
+            detector_input("p-smooth-max-dur", "max turn duration (s)", segment_defaults.max_duration_s, 1),
         ]),
 
         html.Div(id="stab-params", children=[
             html.Div("Stabilization — applies to trunk and stance events",
                      style={"fontSize": "10px", "color": "#888", "borderTop": "1px solid #eee",
                             "paddingTop": "6px", "marginTop": "6px"}),
-            detector_input("p-lambda", "latency penalty", stab_defaults.latency_weight, 0.05),
+            detector_input("p-lambda", "latency penalty (per s)", stab_defaults.latency_weight, 0.05),
             detector_input("p-horizon", "search horizon (s)", stab_defaults.horizon_s, 1),
             detector_input("p-stab-dur", "length (s)", stab_defaults.min_duration_s, 0.5),
         ]),
@@ -493,6 +552,7 @@ def layout() -> html.Div:
                 {"name": "novice", "id": "novice"},
                 {"name": "trained", "id": "trained"},
                 {"name": "dur", "id": "dur"},
+                {"name": "overlap", "id": "overlap"},
                 {"name": "flags", "id": "flags"},
             ],
             row_selectable="single",
@@ -503,6 +563,7 @@ def layout() -> html.Div:
             style_header={"fontWeight": "bold", "backgroundColor": "#f0f0f0"},
             style_data_conditional=[
                 {"if": {"filter_query": '{flags} contains "unsettled"'}, "backgroundColor": "#fff4e0"},
+                {"if": {"filter_query": '{flags} contains "mismatch"'}, "backgroundColor": "#fde2e0"},
                 {"if": {"filter_query": '{flags} contains "off"'}, "color": "#aaa"},
             ],
         ),
@@ -510,6 +571,14 @@ def layout() -> html.Div:
             html.Button("Toggle on/off", id="btn-toggle", n_clicks=0, style={"flex": 1, "fontSize": "11px"}),
             html.Button("Delete", id="btn-delete", n_clicks=0, style={"flex": 1, "fontSize": "11px"}),
         ], style={"display": "flex", "gap": "4px", "marginTop": "6px"}),
+        html.Div([
+            html.Button("Confirm pair", id="btn-confirm-pair", n_clicks=0,
+                        title="Accept a pair the alignment says is not the same movement",
+                        style={"flex": 1, "fontSize": "11px"}),
+            html.Button("Swap leg", id="btn-swap-leg", n_clicks=0,
+                        title="Single-leg stance: exchange the lifted and the stance leg",
+                        style={"flex": 1, "fontSize": "11px"}),
+        ], style={"display": "flex", "gap": "4px", "marginTop": "4px"}),
 
         html.Div([
             html.Strong("Add an event", style={"fontSize": "11px"}),
@@ -518,8 +587,9 @@ def layout() -> html.Div:
             html.Div([
                 dcc.Dropdown(id="add-trial", options=add_options, value=add_value,
                              clearable=False, style={"flex": 1, "fontSize": "11px"}),
-                dcc.Dropdown(id="add-leg", options=["Left", "Right"], value="Left",
-                             clearable=False, style={"flex": 1, "fontSize": "11px"}),
+                dcc.Dropdown(id="add-leg", options=[{"label": "Left leg up", "value": "Left"},
+                                                    {"label": "Right leg up", "value": "Right"}],
+                             value="Left", clearable=False, style={"flex": 1, "fontSize": "11px"}),
             ], style={"display": "flex", "gap": "4px"}),
             html.Div(id="add-hint", style={"fontSize": "10px", "color": "#888", "margin": "2px 0"}),
             html.Button("+ Add event here", id="btn-add", n_clicks=0,
@@ -571,8 +641,8 @@ def layout() -> html.Div:
 
         dcc.Tabs(id="family-tabs", value="trunk", children=[
             dcc.Tab(label="Trunk rotation", value="trunk"),
-            dcc.Tab(label="Monopodal stance (knee > 60 deg)", value="knee"),
-            dcc.Tab(label="General smoothness", value="smooth"),
+            dcc.Tab(label="Single-leg stance", value="knee"),
+            dcc.Tab(label="Sequence turns", value="smooth"),
         ]),
 
         html.Div(id="validation", style={"fontSize": "11px", "padding": "6px 12px"}),
@@ -667,10 +737,10 @@ def register_callbacks(app: Dash) -> None:
     DETECTOR_PANEL = {
         "trunk": ("Detector — trunk rotation", "Re-detect trunk events",
                   "Replaces all trunk-rotation events and discards their edits."),
-        "knee": ("Detector — monopodal stance", "Re-detect stance events",
-                 "Replaces all monopodal-stance events and discards their edits."),
-        "smooth": ("Detector — sequence segments", "Re-detect segments",
-                   "Replaces all sequence segments and discards their edits."),
+        "knee": ("Detector — single-leg stance", "Re-detect stance events",
+                 "Replaces all single-leg-stance events and discards their edits."),
+        "smooth": ("Detector — sequence turns", "Re-detect turns",
+                   "Replaces all sequence turns and discards their edits."),
     }
 
     @app.callback(
@@ -753,6 +823,8 @@ def register_callbacks(app: Dash) -> None:
         Input("btn-redetect", "n_clicks"),
         Input("btn-toggle", "n_clicks"),
         Input("btn-delete", "n_clicks"),
+        Input("btn-confirm-pair", "n_clicks"),
+        Input("btn-swap-leg", "n_clicks"),
         Input("btn-add", "n_clicks"),
         Input("btn-restore", "n_clicks"),
         Input("btn-save-session", "n_clicks"),
@@ -765,8 +837,10 @@ def register_callbacks(app: Dash) -> None:
         State("p-min-dur", "value"), State("p-min-exc", "value"),
         State("p-n-events", "value"), State("p-lambda", "value"),
         State("p-horizon", "value"), State("p-stab-dur", "value"),
+        State("p-knee-method", "value"), State("p-lift-peak", "value"),
+        State("p-lift-rel", "value"), State("p-lift-dur", "value"),
         State("p-knee-thr", "value"), State("p-knee-dur", "value"), State("p-knee-gap", "value"),
-        State("p-smooth-unit", "value"), State("p-smooth-lobe", "value"),
+        State("p-smooth-lobe", "value"),
         State("p-smooth-sep", "value"), State("p-smooth-exc", "value"),
         State("p-smooth-min-dur", "value"), State("p-smooth-max-dur", "value"),
         State("store-view", "data"),
@@ -777,11 +851,11 @@ def register_callbacks(app: Dash) -> None:
     def edit_and_render(novice_relayout, trained_relayout, *args):
         values = list(args[: len(BOUNDARY_INPUTS)])
         rest = args[len(BOUNDARY_INPUTS):]
-        (_redetect, _toggle, _delete, _add, _restore, _save_session, _load_session, _new_session,
-         selection, _editor_revs, session,
+        (_redetect, _toggle, _delete, _confirm, _swap, _add, _restore, _save_session, _load_session,
+         _new_session, selection, _editor_revs, session,
          rel_thr, floor_pct, min_dur, min_exc, n_events, lam, horizon, stab_dur,
-         knee_thr, knee_dur, knee_gap,
-         smooth_unit, smooth_lobe, smooth_sep, smooth_exc, smooth_min_dur, smooth_max_dur,
+         knee_method, lift_peak, lift_rel, lift_dur, knee_thr, knee_dur, knee_gap,
+         smooth_lobe, smooth_sep, smooth_exc, smooth_min_dur, smooth_max_dur,
          view, add_trial, add_leg, trash_index, session_name, session_choice) = rest
 
         trials, displays = workspace.trials, workspace.displays
@@ -809,22 +883,25 @@ def register_callbacks(app: Dash) -> None:
                     min_excursion_deg=float(min_exc or 8.0),
                 ),
                 detection.StabilizationParams(
-                    latency_weight=float(lam or 0.35),
+                    latency_weight=float(lam or 0.65),
                     horizon_s=float(horizon or 10.0),
                     min_duration_s=float(stab_dur or 3.0),
                 ),
                 detection.KneeDetectorParams(
+                    method=knee_method or "lift",
+                    lift_min_peak=float(lift_peak or 0.25),
+                    lift_rel_threshold=float(lift_rel or 0.15),
+                    lift_min_duration_s=float(lift_dur or 0.5),
                     threshold_deg=float(knee_thr or 60.0),
                     min_duration_s=float(knee_dur or 0.4),
                     merge_gap_s=float(knee_gap or 0.2),
                 ),
                 detection.SegmentDetectorParams(
-                    half_cycles=(smooth_unit == "half"),
                     min_lobe_deg=float(smooth_lobe or 10.0),
                     min_lobe_separation_s=float(smooth_sep or 1.5),
                     min_excursion_deg=float(smooth_exc or 10.0),
-                    min_duration_s=float(smooth_min_dur or 2.0),
-                    max_duration_s=float(smooth_max_dur or 20.0),
+                    min_duration_s=float(smooth_min_dur or 1.0),
+                    max_duration_s=float(smooth_max_dur or 15.0),
                 ),
             )
 
@@ -880,24 +957,26 @@ def register_callbacks(app: Dash) -> None:
             # Re-detect only the family whose tab is open, so the other families'
             # curated windows are never replaced by a click meant for this one.
             if family == "trunk":
-                session["trunk_events"] = sessions.seed_session(
-                    trials, trunk_params, stab_params, knee_params, segment_params
-                )["trunk_events"]
-                noun = "trunk-rotation"
+                session["trunk_events"] = sessions.seed_trunk_events(trials, trunk_params, stab_params)
+                noun, prefixes = "trunk-rotation", ("trunk_", "stab_")
             elif family == "knee":
                 session["knee_events"] = sessions.seed_knee_events(trials, stab_params, knee_params)
-                noun = "monopodal-stance"
+                noun, prefixes = "single-leg-stance", ("knee_", "stab_")
             else:
                 session["smooth_events"] = sessions.seed_smooth_events(trials, segment_params)
-                noun = "sequence-segment"
+                noun, prefixes = "sequence-turn", ("smooth_",)
             spans = [
                 (w["event_end"] - w["event_start"]) / fs_of[label]
                 for e in all_events(session, family) for label, w in e["windows"].items()
             ]
 
-            session["detector"] = detection.params_to_dict(
-                trunk_params, stab_params, knee_params, segment_params
-            )
+            # Only the settings the re-detected family was detected with are
+            # recorded; the others still describe the events they produced.
+            everything = detection.params_to_dict(trunk_params, stab_params, knee_params, segment_params)
+            session["detector"] = {
+                **(session.get("detector") or {}),
+                **{key: value for key, value in everything.items() if key.startswith(prefixes)},
+            }
             count = len(all_events(session, family))
             message = (
                 f"Detected {count} {noun} events, windows "
@@ -948,6 +1027,21 @@ def register_callbacks(app: Dash) -> None:
             session_out = session
             message = f"{event['event_id']} {'enabled' if event['enabled'] else 'disabled'}."
 
+        elif event is not None and trigger == "btn-confirm-pair":
+            event["pair_confirmed"] = not event.get("pair_confirmed", False)
+            session_out = session
+            message = (f"{event['event_id']}: pairing confirmed by hand." if event["pair_confirmed"]
+                       else f"{event['event_id']}: pairing back under the alignment check.")
+
+        elif event is not None and trigger == "btn-swap-leg":
+            if family != "knee":
+                message = "Swap leg applies to single-leg-stance events."
+            else:
+                lifted = "Right" if event.get("lifted_leg") == "Left" else "Left"
+                event["lifted_leg"], event["stance_leg"] = lifted, ("Right" if lifted == "Left" else "Left")
+                session_out = session
+                message = f"{event['event_id']}: {lifted.lower()} leg lifted."
+
         elif event is not None and trigger == "btn-delete":
             sessions.delete_event(session, family, event["event_id"])
             message = f"Deleted {event['event_id']}. Restore it from the Deleted events list."
@@ -992,11 +1086,8 @@ def register_callbacks(app: Dash) -> None:
             sessions.save_session(sessions.refresh_seconds(session, trials))
 
         # --- render -------------------------------------------------------
-        detector = session.get("detector") or {}
-        knee_threshold = float(detector.get("knee_threshold_deg", sessions.KNEE_THRESHOLD_DEG))
-        min_lobe_deg = float(
-            detector.get("smooth_min_lobe_deg", detection.SegmentDetectorParams().min_lobe_deg)
-        )
+        _, shown_stab, shown_knee, shown_segment = detection.params_from_dict(session.get("detector") or {})
+        partners = partner_positions(event, trials)
         patches = []
         for label in TRIALS:
             if label not in trials:
@@ -1005,11 +1096,13 @@ def register_callbacks(app: Dash) -> None:
             patch = Patch()
             patch["layout"]["shapes"] = build_shapes(
                 session, selection, label, fs_of[label], displays[label],
-                knee_threshold, min_lobe_deg,
+                shown_knee.threshold_deg, shown_segment.min_lobe_deg, shown_knee.lift_min_peak,
+                partner=partners.get(label),
             )
             patches.append(patch)
 
-        rows = event_table_rows(session, selection.get("family", "trunk"), trials)
+        rows = event_table_rows(session, selection.get("family", "trunk"), trials,
+                                low_confidence_z=shown_stab.low_confidence_z)
         banner = render_issues(validate_session(session, trials))
         title = describe_event(event, selection)
 
@@ -1094,7 +1187,8 @@ def register_callbacks(app: Dash) -> None:
         columns = [{"name": c, "id": c} for c in table.columns]
         figrev = (figrev or 0) + 1
         gallery = [
-            html.Img(src=f"/outputs/{name}?v={figrev}", style={"width": "48%", "border": "1px solid #ddd"})
+            html.Img(src=f"{output_url(recordings.analysis_dir() / name)}?v={figrev}",
+                     style={"width": "48%", "border": "1px solid #ddd"})
             for name in (
                 "trunk_traceability_figure.png",
                 "monopodal_stance_traceability_figure.png",
@@ -1189,9 +1283,10 @@ def describe_event(event: dict | None, selection: dict) -> str:
     if family == "trunk":
         return f"{event['event_id']} - trunk rotation  [{where}]"
     if family == "smooth":
-        return f"{event['event_id']} - sequence part  [{where}]"
-    return (f"{event['event_id']} - {event['flexed_leg']} knee flexed "
-            f"({event['stance_leg']} leg stance)  [{where}]")
+        return f"{event['event_id']} - turn  [{where}]"
+    confirmed = "  pairing confirmed by hand" if event.get("pair_confirmed") else ""
+    return (f"{event['event_id']} - {event.get('lifted_leg', '?')} leg lifted "
+            f"({event.get('stance_leg', '?')} leg stance)  [{where}]{confirmed}")
 
 
 def render_issues(issues: list[Issue]) -> list:

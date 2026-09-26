@@ -7,13 +7,24 @@ and movement-variability metrics on them.
 
 Three families are analysed:
 
-- **Trunk rotation / weight shift** — axial rotation of the trunk relative to the pelvis, and the
-  postural settling that follows it.
-- **Monopodal stance** — single-leg support, identified by unilateral knee flexion above 60°.
-- **Sequence segments** — the moving passages of the whole form, cut at the neutral crossings of the
-  chest yaw into one back-and-forth turn each, and scored for smoothness, chest–pelvis coordination
-  and consistency from one part to the next. Unlike the first two these are not picked out of the
-  recording but tile it, and they have no stabilization window.
+- **Trunk rotation** — axial rotation of the trunk relative to the pelvis, and the window that
+  follows it.
+- **Single-leg (monopodal) stance** — the support phase from lift-off to touch-down, found from leg
+  geometry (one foot clearly higher than the other), and the settling after touch-down.
+- **Sequence turns** — the whole form cut into single-direction turns of the chest, from one turning
+  point of the yaw to the next, scored for smoothness and chest–pelvis coordination. Unlike the
+  first two these are not picked out of the recording but tile its moving passages, and they have no
+  stabilization window.
+
+Every event of every family is paired with the same movement in the other recording through a
+whole-recording alignment, and the novice–trained comparison is made pair by pair
+(`paired_comparison.csv`).
+
+> **Metrics version 2.** The metric definitions were revised after an external review
+> ([Review.md](Review.md)), with every claim checked on the recordings (see
+> [What changed in version 2](#what-changed-in-version-2)). The numbers of the June write-up
+> (`docs/Tai Chi Balance Analysis.pdf`) are metrics version 1 and are reproduced by the git tag
+> `metrics-v1`.
 
 ## Quick start
 
@@ -106,7 +117,7 @@ the button that re-runs it:
 | Recordings | choose a novice and a trained recording from the CSVs in `data/`, or leave one empty; **Use these recordings** switches to that selection | you want to analyse other recordings |
 | 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory and orientation validation figure. Done once per recording and reused by every selection it is in | a recording changes (detected from its size and SHA-256) or the orientation code changes |
 | 2 · Recordings loaded | rebuilds the kinematics from the caches (about 5 s) | after stage 1 (automatic) |
-| 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors, the v1 detectors, or the window CSVs in the selection's folder; the session it replaces is kept in its `sessions/_previous.json` | you want to start the curation over |
+| 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors or the v1 detectors; the session it replaces is kept in its `sessions/_previous.json`. A session from an older schema is migrated when it is opened (the original is kept as `sessions/pre-schema-2-<name>.json`) | you want to start the curation over |
 | 4 · Metrics and figures | runs the windows through every metric and writes the CSVs and figures to the selection's folder | the windows, settings or recordings changed — the card says so |
 
 **Run pipeline** runs every stage that is missing or out of date, in order. Long work runs in the
@@ -139,7 +150,7 @@ committed session in one command:
 ```bash
 python3 -m analysis.pipeline --list                       # the recordings in data/, and their state
 python3 -m analysis.pipeline [--novice FILE] [--trained FILE]
-                             [--force-orientation] [--new-session {v2,v1,csv}] [--workers N]
+                             [--force-orientation] [--new-session {v2,v1}] [--workers N]
 ```
 
 `FILE` is a path relative to `data/`. Give one of `--novice`/`--trained` to analyse a single
@@ -155,6 +166,8 @@ Two switches in `analysis/config.py` change the results, and are shown on the Pi
 | constant | default | meaning |
 | --- | --- | --- |
 | `DETECTOR` | `"v2"` | detectors a new session is taken from when none is chosen — see [Event detection](#event-detection) |
+| `METRICS_VERSION` | `2` | the metric definitions in force; stamped into the session, every CSV and `metrics_provenance.json` |
+| `EXPORT_VERSION` | `2` | format of the 50 Hz export; an older one is rebuilt from the orientation cache, without filtering |
 | `IGNORE_HIGH_PASS_FILTER` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
 
 `DEFAULT_RECORDINGS` sets what is selected before anything has been chosen; afterwards the choice
@@ -178,139 +191,214 @@ Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all f
 
 ## Event detection
 
-Both event families are segmented automatically, and both are editable afterwards.
+Every family is detected automatically and editable afterwards. The detector thresholds are exposed
+as live controls in the editor rather than fixed in code; changing one re-runs detection and redraws
+the bands, and each plot shows the signal and threshold the detector actually used, so every
+boundary can be checked against the signal that produced it.
 
-### Trunk rotation (v2)
+### Axes
+
+The body frame is **x = mediolateral** (the flexion/extension axis), **y = anteroposterior**,
+**z = vertical**. Three independent checks on the recordings agree: at rest the lumbar sensor's
+mounting tilt on the lordosis lies in the y–z plane (neutral acceleration 0.02, −0.30, 0.95 g), hip and
+knee flexion appear on Euler x, and the lumbar tilt about y changes sign with the lifted leg. (The
+code used to say x = forward; the AP and ML sway columns of metrics version 1 are therefore swapped.)
+The signs of +x and +y are not verified — that needs a functional-calibration trial — so only spread
+and range of signed angles are interpreted.
+
+### Gyroscope bias and the vertical reference
+
+When a recording loads, the gyroscope bias of every sensor is taken as the median over the stillest
+10 s near the start and near the end (the stillest by raw angular power summed over all sensors, which
+a constant bias cannot mislead). It is large — about 6.6 °/s on the lumbar sensor and 15 °/s on the
+chest — and is removed from every angular speed. With it left in, the 21 °/s "quiet baseline" of the
+stabilization search was almost all bias, and which participant looked busier depended on the
+direction of turning. The bias spans and values are written to `metrics_provenance.json`, and the log
+warns when the start and end estimates disagree (a recording without genuine quiet standing).
+The Madgwick filter itself is unchanged.
+
+The vertical in each sensor's frame, taken from the neutral pose, gives tilt, turning rate and
+gravity-free acceleration with no yaw in them (`analysis/gravity.py`), so none of these are affected by
+the heading drift of a 6-axis estimate.
+
+### Whole-recording alignment and pairing
+
+Both participants perform the same form, so the two recordings are warped onto each other once, by
+dynamic time warping on slow whole-body channels (chest yaw, trunk–pelvis yaw, both knees' flexion, at
+5 Hz, open ends). Checked against the four single-leg stances, whose pairing is unambiguous, the map
+puts every novice stance within 0.44 s of its trained partner. On these recordings the same moment of
+the form occurs a near-constant **3.4 s later in the novice recording** throughout — both participants
+followed the same instruction video — which is itself worth knowing: tempo was paced externally.
+
+Every family is paired through this map. Pairing by order, which it replaces, compared a different
+movement in all six trunk-rotation pairs of the curated session, and put the full-cycle sequence
+segments half a cycle out of step from the first one on, although both recordings had 13. Validation
+now blocks a pair whose two windows overlap by less than half of the shorter once aligned (unless
+confirmed by hand with **Confirm pair**), and the editor outlines each partner where the map puts it.
+The map is written to `recording_alignment.csv`.
+
+### Trunk rotation
 
 A trunk rotation begins when the trunk starts turning and ends when it stops, which is a statement
 about angular *velocity*. Peaks in the low-pass-filtered yaw-rate envelope are located, and from each
 peak the boundaries are walked outward to where the envelope falls below a fraction of that peak's
-own height — never below a recording-wide floor, which prevents the walk running away through a quiet
-stretch. Event duration is therefore measured rather than assumed.
-
-Because it operates on a derivative, this segmentation is insensitive to the slow yaw drift inherent
-to 6-axis orientation estimates.
-
-On the present recordings it yields events of **2.1–7.8 s** (mean 3.7 s). The earlier method
-(v1, retained so previously published results remain reproducible: choose it under **New session**
-on the Pipeline page) scored a **fixed 8 s** sliding window, so every event came out exactly 8.000 s long — roughly twice the
-duration of the actual movement, with the remainder averaging over near-stationary data.
-
-Novice and trained events are paired **by temporal order**, on the premise that both participants
-perform the same form. Dynamic-time-warping matching, as v1 uses, is not used by v2: events
-of 2–4 s are not distinctive enough for it to match reliably, and because the search is constrained
-to advance monotonically, a single mismatch propagates to every later event. Pairings should be
-checked in the editor.
+own height — never below a recording-wide floor. Event duration is therefore measured rather than
+assumed (2–7 s here). Candidates of both recordings are paired when each is the other's best match by
+intersection over union (≥ 0.5) once aligned, and the six pairs whose weaker partner is strongest are
+kept. The original fixed 8 s windows with DTW template matching (v1) remain selectable under
+**New session**.
 
 ### Stabilization
 
-The settling window that follows each event is chosen by minimising
-`mean(ω_lumbar + ω_chest) / quiet_baseline + λ · latency` over a search horizon, where the baseline is
-a recording-wide percentile. The latency term encodes that stabilization is what *follows* the event
-and stops the search drifting to a quieter moment several seconds later.
+The window that follows each event is chosen by minimising `z + λ · latency` over a search horizon,
+where `z = (mean ω − baseline) / spread` measures the bias-corrected lumbar + chest angular speed
+against the recording itself (baseline: its 20th percentile, spread: from there to its median), and
+λ = 0.65 per second is the trade-off the original ratio score made. A window with z > 1 — busier than
+the recording's median moment — is flagged `unsettled`. **After the trunk rotations of this form nobody
+settles**: 10 of the 12 post-rotation windows are flagged, so their sway describes the transition into
+the next movement, not a recovery. The windows after a single-leg stance's touch-down mostly are quiet.
 
-Each window carries a **quiet ratio** — its mean angular velocity divided by the recording's quiet
-baseline. Values above 1.6 are flagged in the editor as low-confidence: they indicate the participant
-had not actually settled, which on these recordings is sometimes genuinely the case rather than a
-detection failure.
+### Single-leg stance
 
-### Monopodal stance
+A single-leg phase is where one foot is clearly higher than the other. The **lift index** is each
+leg's vertical reach — the cosine of the thigh's tilt from vertical plus the shank's — for the right
+leg minus the left, in thigh lengths: positive when the left foot is up. Peaks above 0.25 (about
+10 cm) are lifts, and the boundaries walk out to 15 % of each peak, never below the double-support
+level (the median |lift|). This finds the whole support phase whatever the knee does, and which leg
+is up. On these recordings it finds exactly four per participant: a knee lift on each side, then a lift
+with a kick on each side.
 
-Windows where the low-pass-filtered knee flexion magnitude exceeds 60° for at least 0.4 s, merging
-gaps below 0.2 s.
+The earlier rule, knee flexion above 60°, is still selectable (it is what v1 sessions use). It split
+each kick where the knee straightened, and when the right kick was re-entered by hand it was entered as
+a left-leg event — its "11° peak flexion" was the stance knee. Validation now errors on a stance whose
+labelled leg is the lower foot, the editor has **Swap leg**, and the migration to schema 2 relabelled
+that event.
 
-### Tunable parameters
+### Sequence turns
 
-The detector thresholds are exposed as live controls in the editor rather than fixed in code.
-Changing one re-runs detection and redraws the bands immediately, and the plot shows the velocity
-envelope and the threshold the detector actually used, so every boundary can be checked against the
-signal that produced it.
+The form is carried by large chest yaw rotations. Each turn runs from one turning point of the
+(0.5 Hz-smoothed) chest yaw to the next, so it starts and ends with the chest momentarily still and
+turns one way throughout — a discrete movement, which is what SPARC assumes. (The earlier segments were
+cut at neutral crossings, where the turning speed peaks.) The turning points of the two recordings are
+matched through the alignment, and each turn is made between consecutive matched points in both
+recordings at once, so an extra wiggle in one recording stays inside a turn instead of shifting every
+later pair.
 
 ---
 
 ## Metrics
 
-Written to `outputs/trunk_rotation_balance_metrics.csv` and
-`outputs/monopodal_stance_balance_metrics.csv`.
+Metric CSVs have one row per event per recording, with `event_id` shared by the two members of a pair,
+and `recording` and `metrics_version` columns.
+
+### Trunk rotation — `trunk_rotation_balance_metrics.csv`
 
 | metric | window | meaning |
 | --- | --- | --- |
-| `trunk_pelvis_peak_cross_correlation`, `trunk_pelvis_lag_s` | event | trunk–pelvis yaw coordination and its time offset |
-| `trunk_pelvis_pitch_lag_s` | event | same in the sagittal plane (monopodal stance only) |
-| `weight_shift_dimensionless_jerk`, `..._log10_...` | event | movement smoothness; see [docs/notes.txt](docs/notes.txt) for why log₁₀ is the inferential form |
-| `lumbar_ap_acc_variance_g2`, `lumbar_ml_acc_variance_g2` | stabilization | anteroposterior / mediolateral postural sway |
-| `lumbar_orientation_variability_deg` | stabilization | pooled SD of lumbar orientation |
-| `corrective_peak_rate_hz` | stabilization | rate of corrective angular-velocity bursts |
-| `lumbar_rms_angular_velocity_dps` | stabilization | RMS lumbar angular velocity |
-| `peak_knee_flexion_deg`, `time_to_stabilization_s` | event | monopodal stance only |
+| `trunk_pelvis_lag_s`, `trunk_pelvis_yaw_r` | event, padded 2 s each side | pelvis-to-chest turning lag (negative: the pelvis leads) and the correlation behind it |
+| `trunk_yaw_sparc` | event | smoothness of the trunk-on-pelvis turning speed; less negative is smoother |
+| `trunk_yaw_excursion_deg`, `trunk_yaw_peak_rate_dps` | event | how far and how fast the trunk turned on the pelvis |
+| `lumbar_ml_acc_rms_mps2`, `lumbar_ap_acc_rms_mps2` | post-rotation | mediolateral / anteroposterior sway: gravity-free lumbar acceleration in the pelvis-heading frame, RMS about the window mean |
+| `lumbar_frontal_tilt_sd_deg`, `lumbar_sagittal_tilt_sd_deg` | post-rotation | sideways / forward-backward tilt spread of the pelvis, with no yaw in it |
+| `lumbar_rms_angular_velocity_dps` | post-rotation | overall lumbar angular activity, bias-corrected; needs no threshold |
+| `lumbar_corrective_peak_rate_hz` | post-rotation | angular-speed bursts per second above a recording-wide threshold — secondary: zero in most windows |
+| `stabilization_quiet_z` | post-rotation | how quiet the window was (0 = the recording's quietest fifth, 1 = its median) |
 
-### Sequence smoothness
+### Single-leg stance — `monopodal_stance_balance_metrics.csv`
 
-Written per segment to `outputs/sequence_smoothness_metrics.csv`, and summarised per participant to
-`outputs/sequence_variability_summary.csv`. The summary file is the movement-variability result: it
-reports the spread of each per-segment metric across the parts of the form.
+| metric | window | meaning |
+| --- | --- | --- |
+| `support_duration_s`, `peak_lift_index` | support | how long, and how high the foot went (thigh lengths) |
+| `peak_knee_flexion_deg`, `knee_extension_while_lifted_deg`, `peak_hip_flexion_deg` | support | what the lifted leg did; the extension is large for a kick |
+| `support_*` (`ml_acc_rms_mps2`, `ap_acc_rms_mps2`, `frontal_tilt_sd_deg`, `sagittal_tilt_sd_deg`, `rms_angular_velocity_dps`, `corrective_peak_rate_hz`) | support | balance on one foot: the sway, tilt and angular activity of the pelvis while the base of support is a single foot |
+| `settle_*` (the same) | after touch-down | settling |
+| `time_to_stabilization_s` | — | touch-down to the start of settling |
+| `lumbar_frontal_tilt_at_peak_deg` | highest lift | sideways pelvis tilt at the highest lift |
+| `trunk_pelvis_lag_s`, `trunk_pelvis_frontal_lag_s` (with `_r`) | 2 s before to 3 s after the highest lift | kept in the CSV only: the correlation behind them is weak during a stance |
+
+`monopodal_stance_asymmetry_metrics.csv` compares **mirrored stances** — the k-th left lift with the
+k-th right lift, or events sharing a `movement` label — as signed left-minus-right differences per
+pair, plus the mean absolute difference. Pooling all left against all right events, as before,
+compared a knee lift with a kick.
+
+### Sequence turns — `sequence_smoothness_metrics.csv`, `sequence_summary.csv`
 
 | metric | meaning |
 | --- | --- |
-| `chest_yaw_log10_dimensionless_jerk` | smoothness of the turn, same definition as the weight-shift jerk above; lower is smoother |
-| `chest_yaw_sparc` | spectral arc length of the yaw speed profile (Balasubramanian et al. 2015); negative, less negative is smoother |
-| `chest_yaw_submovement_rate_hz` | separate speed peaks per second — one continuous turn has one peak, a hesitant one has several |
-| `chest_pelvis_lag_s`, `chest_pelvis_peak_cross_correlation` | chest–pelvis coordination and its time offset, over the segment |
-| `chest_pelvis_gain` | pelvis yaw range ÷ chest yaw range; 1 = the trunk turns as a unit |
-| `relative_yaw_range_deg`, `relative_yaw_rms_deg` | how much axial twist opens up inside the segment |
-| `duration_cv`, `chest_yaw_excursion_cv`, `*_sd` | *(summary)* consistency of the parts in length, size and movement quality |
-| `waveform_mean_sd_deg`, `waveform_variance_ratio` | *(summary)* spread of the time-normalised, sign-aligned corridor; the variance ratio is the dimensionless Kadaba form, lower being more repeatable |
+| `turn_duration_s`, `chest_yaw_excursion_deg`, `chest_yaw_peak_rate_dps` | how long, how far and how fast the chest turned (from the integrated gyroscope turning rate) |
+| `chest_yaw_sparc` | smoothness of the turning speed (SPARC, Balasubramanian et al. 2012/2015, padlevel 4); less negative is smoother |
+| `chest_yaw_submovement_rate_hz` | separate speed peaks per second — one continuous turn has one |
+| `chest_pelvis_lag_s`, `chest_pelvis_yaw_r` | pelvis-to-chest turning lag and its correlation |
+| `chest_pelvis_gain` | pelvis turn ÷ chest turn; 1 = the trunk turns as a unit |
+| `relative_yaw_range_deg`, `relative_yaw_sd_deg` | how much axial twist opens up inside the turn |
+| `chest_yaw_log10_dimensionless_jerk` | secondary, for comparability only (see below) |
 
-Jerk and SPARC measure different aspects of smoothness and need not agree — on these recordings they
-point in opposite directions. Report both rather than picking the flattering one.
+`sequence_summary.csv` gives per recording the number of turns and the median of each metric.
+Medians, not spreads: every turn is a different movement of the form, performed once, so the spread of
+a metric across turns describes the choreography rather than anyone's consistency. That is why the
+across-segment CV, SD and variance ratio of metrics version 1 are gone.
 
-`monopodal_stance_asymmetry_metrics.csv` reports absolute left-versus-right differences per
-participant, averaged over events.
+### Novice versus trained — `paired_comparison.csv`
 
-### Metric reliability
+For every family and metric, over the events present in both recordings: the number of pairs, each
+performer's median, the median trained-minus-novice difference with its quartiles, and the fraction of
+pairs in which the trained value is the higher. It is descriptive — one participant per group, and
+consecutive events of one performance are not independent samples — so no p-values are given. On
+these recordings, for example, the trained performer's turns are smoother (higher SPARC) in 24 of 28
+matched turns of equal median duration, and their mediolateral sway during single-leg support is lower
+in all four stances.
 
-Because event boundaries can be placed by hand, each metric was tested by **jittering every boundary
-by ±0.25 s** — about the precision of a manual adjustment — and measuring how much it moved.
-Reliability is reported as an ICC: between-event signal divided by signal plus measurement noise.
+### Why dimensionless jerk is secondary
 
-| metric | ICC | note |
+For these slow, long movements the jerk integral is dominated by noise near the low-pass cutoff, whose
+contribution grows like duration⁶/amplitude². Over the 56 turns, log₁₀ DJ = 4.90 + 5.69 log₁₀ D − 1.61
+log₁₀ A (R² = 0.955) — the exponents a noise floor predicts — and 86–93 % of the jerk power lies above
+1 Hz while the turns are ~0.1 Hz. SPARC is valid on gyroscope angular velocity where log dimensionless
+jerk is error-prone (Melendez-Calderon et al. 2021), so it is the primary smoothness measure.
+
+### Boundary robustness
+
+Because boundaries can be placed by hand, `analysis/tools/boundary_robustness.py` jitters every
+boundary of the working session by up to ±0.25 s (about the precision of a manual drag), 20 times, and
+reports ICC(1,1) of each metric — the share of its variance that is between events rather than due to
+where exactly the boundaries fell. This is robustness to curation, **not test–retest reliability**,
+which needs a second session. On the current session:
+
+| family | metrics | ICC |
 | --- | --- | --- |
-| `corrective_peak_rate_hz` | 0.97 | replaces the count below |
-| `lumbar_rms_angular_velocity_dps` | 0.98 | threshold-free alternative |
-| `lumbar_ml_acc_variance_g2` | 0.97 | |
-| `lumbar_ap_acc_variance_g2` | 0.96 | |
-| `corrective_lumbar_angular_velocity_peak_count` | 0.41 | **superseded — retained only for comparability** |
+| trunk rotation | lag, excursion, ML and AP sway | 0.98–1.00 |
+| trunk rotation | SPARC, frontal / sagittal tilt SD, lumbar ω RMS | 0.93–0.97 |
+| single-leg stance | peak lift, peak knee flexion, support duration, support sway, tilt and ω RMS, settling sway | 0.96–1.00 |
+| single-leg stance | `time_to_stabilization_s` | **0.51** — the gap between two boundaries: read with caution |
+| turns | duration, excursion, peak rate, lag, twist range | 0.99–1.00 |
+| turns | SPARC, gain, submovement rate | 0.90–0.97 |
 
-Two design consequences follow, both empirically determined:
+`analysis/tools/method_checks.py` re-runs every check the method choices above rest on and prints the
+numbers quoted in this README.
 
-- **Corrective activity is reported as a rate against a recording-wide threshold.** The original
-  count derived its threshold from each window's own distribution, so a window twice as busy was
-  scored against a bar more than twice as high; it measured shape rather than magnitude (ICC 0.41).
-  The columns `corrective_lumbar_angular_velocity_peak_count`,
-  `largest_corrective_lumbar_angular_velocity_dps` and `corrective_peak_count` are kept so earlier
-  results can still be reproduced, but should not be used for new inference.
-- **The stabilization window is 3 s** rather than 2 s, which raises mediolateral sway reliability
-  from ICC 0.91 to 0.97. Longer windows score marginally higher still but begin to overlap the
-  following movement.
+### What changed in version 2
 
-Detrending or tapering the sway variances was tested and **rejected**: it lowered reliability
-(mediolateral ICC 0.91 → 0.86), because the trend within a stabilization window is postural signal
-rather than artefact.
+The external review's claims were each checked on the recordings, which the reviewer did not have:
 
-### Coordination-lag windows
+| issue | on these recordings | change |
+| --- | --- | --- |
+| Lag estimator z-scored the whole window, then divided by the overlap count | r > 1 in 7 of 12 trunk rows; a synthetic 0.30 s lag came out as 0.00–0.17 s | per-lag Pearson on the overlap, most positive peak, ±1 s, NaN at the bound |
+| AP and ML sway labels swapped | x is the flexion axis (see [Axes](#axes)) | columns named by the correct axis |
+| Sway variance in sensor axes | tilt-projected gravity inflated it 1.8–2.9× (ML) and 7.7–9.4× (AP, median) | gravity-free acceleration in the pelvis-heading frame, as RMS |
+| Orientation variability pooled Euler x, y, z | dominated by continuing yaw (SD 6–16°; tilt 0.5–3.5°) | frontal and sagittal tilt SD, no yaw |
+| Gyroscope bias in every angular speed | 6.6 °/s lumbar, 15 °/s chest; reversed the novice/trained ordering of lumbar ω | removed at load time |
+| Pairing by order | all six trunk pairs and half the sequence pairs were different movements | whole-recording alignment |
+| Stance = knee > 60° | the kicks were split; one hand-entered event had the wrong leg | leg lift index; leg-side validation |
+| SPARC on full cycles cut at neutral, padlevel 2 | cut where speed peaks | per single-direction turn from the gyroscope, padlevel 4 |
+| 0.05 Hz high-pass on yaw | shrank 8–14 s turns by 23–26 % | turn angles from the integrated gyroscope rate |
+| Across-segment spread reported as "the variability answer" | the segments are different movements | per-recording medians; paired comparison |
+| All joint angles high-passed in the 50 Hz export | a held knee flexion lost its level | only axial (z) channels high-passed |
 
-`cross_correlation_lag` searches ±2 s. A window shorter than roughly 4 s cannot support that search —
-at the extreme lag the two signals barely overlap, the overlap-normalised correlation is computed
-from a short tail, and the estimate pins to the bound rather than finding a peak. Any result at
-±1.998 s is a failure marker, not a measurement, and the editor flags it.
-
-The lag window is therefore decoupled from the event window:
-
-- trunk rotation — the event window padded by 2 s on each side (`lag_pad_s`)
-- monopodal stance — 2 s before to 3 s after peak flexion (`knee_lag_window_s`)
-
-Both are recorded in the session file. Sessions taken from the v1 detectors or from the window CSVs
-leave them unset and reproduce the original behaviour exactly.
+Not taken up, because these recordings cannot support it: repetition variability and coordination
+(coupling-angle) variability need the same movement performed many times; entropy of quiet standing
+needs longer holds than the ~15–25 s here; Lyapunov exponents need hundreds of cycles
+([docs/Implementation_strategy.md](docs/Implementation_strategy.md)). What the next recordings would
+need is in [Recommendations_for_next_recordings.md](Recommendations_for_next_recordings.md).
 
 ---
 
@@ -323,14 +411,14 @@ outputs/
   recordings/<recording>/          one folder per recording, whichever selections use it
     recording.json                 the source file: name, size, SHA-256; sampling rate, samples, sensors
     orientation.npz                full-rate quaternions (wxyz) for every sensor, plus time_s
-    kinematic_variables_50hz.csv   all joint angles resampled to 50 Hz (40 columns)
+    kinematic_variables_50hz.csv   all joint angles resampled to 50 Hz (40 columns; only yaw and joint z high-passed)
     sensor_inventory.csv           per-sensor sample counts, duration, sampling rate, missing values
     orientation_validation.png     lumbar and sternum orientation, for sanity-checking the filter
   analyses/<selection>/            one folder per selection of recordings
     analysis.json                  which recordings, by name, size and SHA-256
     event_editor_session.json      the curated windows and their provenance
     sessions/                      named copies of the session, and the _previous undo slot
-    metrics_provenance.json        which windows, settings and recordings the metrics came from, and when
+    metrics_provenance.json        which windows, settings, recordings, gyroscope bias and alignment the metrics came from
     ... the CSVs and figures below
 ```
 
@@ -343,16 +431,18 @@ still says where it came from.
 
 | file (in the selection's folder) | contents |
 | --- | --- |
+| `paired_comparison.csv` | novice versus trained, pair by pair, for every family and metric |
 | `trunk_rotation_event_windows.csv` | event and stabilization boundaries, per recording |
 | `trunk_rotation_balance_metrics.csv` | trunk-rotation metrics |
-| `monopodal_stance_event_windows.csv` | knee-flexion event boundaries |
-| `monopodal_stance_balance_metrics.csv` | monopodal-stance metrics |
-| `monopodal_stance_asymmetry_metrics.csv` | left/right differences per recording |
-| `sequence_smoothness_metrics.csv`, `sequence_variability_summary.csv` | sequence-segment metrics, and their spread per recording |
-| `trunk_traceability_figure.png` | trunk-rotation time series with event and stabilization bands, plus metric comparison |
-| `monopodal_stance_overview_figure.png` | knee flexion and trunk response |
-| `monopodal_stance_traceability_figure.png` | monopodal-stance equivalent of the trunk figure |
-| `sequence_smoothness_figure.png` | the segments, their waveform corridor and metrics |
+| `monopodal_stance_event_windows.csv` | single-leg support windows: lifted leg, highest lift, settling |
+| `monopodal_stance_balance_metrics.csv` | single-leg-stance metrics |
+| `monopodal_stance_asymmetry_metrics.csv` | left-minus-right differences between mirrored stances |
+| `sequence_smoothness_metrics.csv`, `sequence_summary.csv` | per-turn metrics, and their medians per recording |
+| `recording_alignment.csv` | the novice-to-trained clock map at 1 Hz, for tracing any pair by hand |
+| `trunk_traceability_figure.png` | trunk-rotation time series with event and post-rotation bands, plus paired metrics |
+| `monopodal_stance_overview_figure.png` | lift index, knee flexion and pelvis tilt |
+| `monopodal_stance_traceability_figure.png` | single-leg support and settling bands on the lift index, plus paired metrics |
+| `sequence_smoothness_figure.png` | the turns, their typical time course, and paired metrics |
 
 Recalculating (stage 4) rewrites the selection's CSVs, figures and `metrics_provenance.json`. Stage 1
 writes the recording folders, which do not depend on event windows.
@@ -373,11 +463,14 @@ analysis/
   orientation.py          quaternion algebra, Madgwick filter, sensor-mounting alignment
   recordings.py           the recordings in data/, the selection, and where their outputs go
   data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
-  kinematics.py           segment and joint angles; fast loading from the orientation cache
-  detection.py            v2 event detection (trunk, stance, segments, stabilization), pairing
+  kinematics.py           segment and joint angles; gyroscope bias and vertical reference; fast loading
+  gravity.py              tilt, turning rate, gravity-free sway and leg lift, from each segment's vertical
+  alignment.py            whole-recording DTW between the two recordings; event and landmark matching
+  detection.py            v2 event detection (trunk, stance, turns, stabilization), pairing via the alignment
   detection_v1.py         original fixed-window detector and DTW matching (v1)
-  smoothness_metrics.py   smoothness, coordination and consistency per sequence segment
-  balance_metrics.py      trunk-rotation and monopodal-stance metrics
+  smoothness_metrics.py   smoothness and chest–pelvis coordination per turn
+  balance_metrics.py      trunk-rotation and single-leg-stance metrics, mirrored asymmetry
+  comparison.py           novice versus trained, paired event by event
   figures.py              all output figures
   sessions.py             the session file: seeding, editing, named copies, migration
   validation.py           window checks that gate recalculation
@@ -413,10 +506,17 @@ used without the ones after it — nothing outside `dashboard/` depends on Dash.
   constraints — are discussed in [docs/notes.txt](docs/notes.txt).
 - **Two participants, one trial each.** Differences between the novice and trained recordings are
   descriptive. No statistical inference about training effects is supported by this sample.
-- **Novice/trained event pairing is by order** and should be verified visually.
-- **Sequence segments cover the moving passages only**, about 60 % of each recording. The still
-  spans at the start, middle and end of the form produce no segment, by design — a "cycle" spanning
-  a pause would be mostly not moving.
+- **Pairs rest on the whole-recording alignment**, which is only meaningful where the form is being
+  performed; in the quiet standing at either end it maps arbitrarily (no event lies there).
+- **Each movement is performed once.** Variability across repetitions of the same movement, and
+  coordination (coupling-angle) variability, cannot be computed from these recordings; the spread
+  across different events describes the choreography.
+- **Post-rotation windows are not quiet** (see [Stabilization](#stabilization)): read the trunk
+  family's sway as the transition into the next movement.
+- **The right-foot gyroscope is noisy** — 16–21 °/s RMS while standing still, against 7 °/s on the
+  left — which is why no stance-foot measure is reported.
+- **Sequence turns cover the moving passages only**. The still spans at the start and end, and the
+  single-leg passage in the middle (where the chest barely turns), produce no turn, by design.
 - **Segment lengths are nominal.** No anthropometric scaling or functional joint-axis calibration is
   applied, so joint angles carry soft-tissue and mounting error.
 - [docs/Implementation_strategy.md](docs/Implementation_strategy.md) describes a largest-Lyapunov-exponent analysis that is planned but not

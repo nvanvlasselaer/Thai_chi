@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, correlate, correlation_lags, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt
 
 from analysis import config
 
@@ -115,21 +115,73 @@ def extract_contiguous_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
-def cross_correlation_lag(a: np.ndarray, b: np.ndarray, fs: float, max_lag_s: float = 2.0) -> tuple[float, float]:
-    a = lowpass_signal(a, fs, cutoff_hz=6.0)
-    b = lowpass_signal(b, fs, cutoff_hz=6.0)
-    a = (a - np.mean(a)) / (np.std(a) + 1e-12)
-    b = (b - np.mean(b)) / (np.std(b) + 1e-12)
-    max_lag = int(max_lag_s * fs)
-    corr = correlate(a, b, mode="full", method="fft")
-    lags = correlation_lags(len(a), len(b), mode="full")
-    overlap = correlate(np.ones_like(a), np.ones_like(b), mode="full", method="direct")
-    values = corr / np.maximum(overlap, 1.0)
-    keep = np.abs(lags) <= max_lag
-    lags = lags[keep]
-    values = values[keep]
-    idx = int(np.argmax(np.abs(values)))
-    return float(values[idx]), float(lags[idx] / fs)
+LAG_SEARCH_S = 1.0
+"""How far :func:`pearson_lag` looks either way.  Every pelvis-chest lag on these
+recordings lies between -0.13 and -0.45 s; an offset beyond a second is a
+different phase of the movement, not the coordination of one."""
+
+LAG_MIN_OVERLAP = 0.5
+"""Fraction of the window that must overlap at a lag for it to be scored."""
+
+
+def pearson_lag(
+    a: np.ndarray,
+    b: np.ndarray,
+    fs: float,
+    max_lag_s: float = LAG_SEARCH_S,
+    min_overlap: float = LAG_MIN_OVERLAP,
+    work_fs: float = 50.0,
+) -> tuple[float, float]:
+    """Peak correlation between two signals over a range of lags, and that lag.
+
+    At every lag the Pearson correlation is computed on the overlapping samples
+    only, with their own means and standard deviations, so the value is a true
+    correlation and cannot exceed 1.  (The overlap-normalised estimator this
+    replaces z-scored over the whole window and then divided by the overlap
+    count: 7 of 12 trunk rows came out above 1, and on a synthetic turn with a
+    known 0.30 s lag it returned 0.00-0.17 s depending on where the turn sat in
+    the window.  This returns 0.300 s wherever it sits.)
+
+    Only the most positive peak counts -- an anti-phase peak is not the two
+    segments moving together.  The lag is refined to sub-sample precision by a
+    parabola through the peak and its neighbours.
+
+    Returns ``(r, lag_s)``; ``lag_s < 0`` means ``a`` leads ``b``.  The lag is
+    NaN when the peak sits on the edge of the search range, where it is a
+    failure marker rather than a measurement, and both are NaN when no lag has
+    enough overlap.  The signals are low-passed at 6 Hz and decimated to about
+    ``work_fs`` first, which changes nothing below 6 Hz and makes the search cheap.
+    """
+    a = lowpass_signal(np.asarray(a, dtype=float), fs, cutoff_hz=6.0)
+    b = lowpass_signal(np.asarray(b, dtype=float), fs, cutoff_hz=6.0)
+    step = max(1, int(round(fs / work_fs)))
+    a, b = a[::step], b[::step]
+    rate = fs / step
+    n = min(len(a), len(b))
+    a, b = a[:n], b[:n]
+    max_lag = int(round(max_lag_s * rate))
+
+    lags, values = [], []
+    for k in range(-max_lag, max_lag + 1):
+        x, y = (a[k:], b[:n - k]) if k >= 0 else (a[:n + k], b[-k:])
+        if len(x) < max(3, min_overlap * n):
+            continue
+        sx, sy = np.std(x), np.std(y)
+        if sx <= 0 or sy <= 0:
+            continue
+        lags.append(k)
+        values.append(float(np.mean((x - x.mean()) * (y - y.mean())) / (sx * sy)))
+    if not values:
+        return float("nan"), float("nan")
+
+    best = int(np.argmax(values))
+    r = values[best]
+    if best == 0 or best == len(values) - 1:
+        return r, float("nan")
+    y0, y1, y2 = values[best - 1], values[best], values[best + 1]
+    curvature = y0 - 2.0 * y1 + y2
+    shift = 0.5 * (y0 - y2) / curvature if curvature < 0 else 0.0
+    return r, float((lags[best] + shift) / rate)
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +189,7 @@ def cross_correlation_lag(a: np.ndarray, b: np.ndarray, fs: float, max_lag_s: fl
 #
 # The pipeline converts an index to seconds as idx / fs, so the exact inverse is
 # round(t * fs).  Truncating instead shifts the window by one sample, which
-# changes lumbar_ap_acc_variance_g2 by ~0.8 % -- small enough to miss, large
+# changed the lumbar sway variance by ~0.8 % -- small enough to miss, large
 # enough to matter.  Every conversion in the editor goes through these two.
 # ---------------------------------------------------------------------------
 

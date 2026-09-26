@@ -164,13 +164,15 @@ EXPORTED_JOINTS = (
 )
 """Joint angles in the export, in column order.  Each contributes x, y and z."""
 
-
 def save_kinematic_variables(path: Path, kin: Kinematics, fs: float, target_fs: float = 50.0) -> None:
     """Write the trunk angles, angular speeds and every joint angle at 50 Hz.
 
-    Each channel is anti-alias filtered and resampled.  Yaw (z) channels and
-    all joint angles are high-pass detrended first to remove drift; trunk and
-    lumbar tilt (x, y) and the angular speeds are exported as they are.
+    Each channel is anti-alias filtered and resampled.  Yaw and the axial (z)
+    component of every joint angle are high-pass detrended first to remove the
+    heading drift of a 6-axis estimate; tilt and joint flexion (x) and y
+    components are gravity-referenced and exported as they are, and the
+    angular speeds have the gyroscope bias removed.  Axes: x = mediolateral,
+    y = anteroposterior, z = vertical (:func:`analysis.orientation.mounting_matrix`).
     """
 
     def detrended(signal: np.ndarray) -> np.ndarray:
@@ -190,7 +192,7 @@ def save_kinematic_variables(path: Path, kin: Kinematics, fs: float, target_fs: 
     for joint in EXPORTED_JOINTS:
         angles = getattr(kin, f"{joint}_deg")
         for axis, name in enumerate("xyz"):
-            channels[f"{joint}_{name}_est_deg"] = detrended(angles[:, axis])
+            channels[f"{joint}_{name}_est_deg"] = detrended(angles[:, axis]) if name == "z" else angles[:, axis]
 
     resampled = {name: resample_filtered_full(kin.t, signal, fs, target_fs) for name, signal in channels.items()}
     time_s = resampled["trunk_pelvis_x_deg"][0]

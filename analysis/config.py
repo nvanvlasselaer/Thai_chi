@@ -39,6 +39,22 @@ IGNORE_HIGH_PASS_FILTER = False
 # kept so the committed results stay reproducible.
 DETECTOR = "v2"
 
+METRICS_VERSION = 2
+"""Which definition of the metrics produced the numbers, stamped into every
+session save, every metric CSV and metrics_provenance.json.
+
+1. Everything up to the git tag ``metrics-v1``: overlap-normalised cross-
+   correlation lag, sensor-axis acceleration variance with gravity in it and
+   the AP/ML labels swapped, raw gyroscope magnitude (bias included), knee
+   flexion > 60 deg for single-leg stance, full-cycle sequence segments paired
+   by order.
+2. After the external review (Review.md), verified on the recordings: per-lag
+   Pearson lag, gravity-compensated sway in the pelvis-heading frame with the
+   axes named correctly (x = mediolateral, y = anteroposterior), gyroscope bias
+   removed, single-leg stance from leg geometry, single-direction turns, and
+   every family paired through a whole-recording alignment.
+"""
+
 # Body segment each sensor is strapped to.  Placement is described in
 # docs/notes.txt.
 SENSOR_MAP = {
@@ -57,3 +73,16 @@ SENSOR_MAP = {
     "lhand": "Left Hand",
     "rhand": "Right Hand",
 }
+
+EXPORT_VERSION = 2
+"""Format of the 50 Hz kinematic export, recorded in each recording's
+``recording.json``; an older one marks the export out of date, and it is
+rebuilt from the orientation cache without re-running the filter.
+
+1. Every joint angle high-passed at 0.05 Hz, so each joint had zero mean -- a
+   knee held flexed for tens of seconds lost its flexion -- and the angular
+   speeds included the gyroscope bias.
+2. Joint x (flexion, the mediolateral axis) and y are gravity-referenced and
+   exported as they are; only the axial z channels, which carry the heading
+   drift of two sensors, are high-passed.  Angular speeds are bias-corrected.
+"""

@@ -18,20 +18,22 @@ from analysis import config, pipeline, recordings
 from analysis.recompute import read_provenance
 
 TABLES = {
+    "paired": ("Novice vs trained", "paired_comparison.csv"),
     "trunk": ("Trunk rotation", "trunk_rotation_balance_metrics.csv"),
-    "knee": ("Monopodal stance", "monopodal_stance_balance_metrics.csv"),
-    "asymmetry": ("Stance asymmetry", "monopodal_stance_asymmetry_metrics.csv"),
-    "smooth": ("Sequence segments", "sequence_smoothness_metrics.csv"),
-    "variability": ("Sequence variability", "sequence_variability_summary.csv"),
+    "knee": ("Single-leg stance", "monopodal_stance_balance_metrics.csv"),
+    "asymmetry": ("Left vs right", "monopodal_stance_asymmetry_metrics.csv"),
+    "smooth": ("Sequence turns", "sequence_smoothness_metrics.csv"),
+    "summary": ("Turn summary", "sequence_summary.csv"),
     "trunk_windows": ("Trunk windows", "trunk_rotation_event_windows.csv"),
     "knee_windows": ("Stance windows", "monopodal_stance_event_windows.csv"),
+    "alignment": ("Alignment", "recording_alignment.csv"),
     "inventory": ("Sensor inventory", None),
 }
 FIGURES = [
-    ("trunk_traceability_figure.png", "Trunk rotation: windows and metrics"),
-    ("monopodal_stance_traceability_figure.png", "Monopodal stance: windows and metrics"),
-    ("monopodal_stance_overview_figure.png", "Monopodal stance: knee flexion and trunk response"),
-    ("sequence_smoothness_figure.png", "Sequence segments: smoothness and consistency"),
+    ("trunk_traceability_figure.png", "Trunk rotation: windows and paired metrics"),
+    ("monopodal_stance_traceability_figure.png", "Single-leg stance: support windows and paired metrics"),
+    ("monopodal_stance_overview_figure.png", "Single-leg stance: which foot was up, the knees and the pelvis"),
+    ("sequence_smoothness_figure.png", "Sequence turns: smoothness and chest-pelvis coordination"),
 ]
 NUMBER = Format(precision=4, scheme=Scheme.decimal_or_exponent)
 
@@ -41,7 +43,7 @@ def layout() -> html.Div:
         html.H2("Results", style={"margin": "0 0 4px"}),
         html.Div(id="results-meta", style={"fontSize": "13px", "color": "#555", "marginBottom": "14px"}),
         dcc.RadioItems(
-            id="results-table-choice", value="trunk", inline=True,
+            id="results-table-choice", value="paired", inline=True,
             options=[{"label": title, "value": key} for key, (title, _) in TABLES.items()],
             inputStyle={"marginRight": "4px"},
             labelStyle={"marginRight": "14px", "fontSize": "13px", "cursor": "pointer"},
@@ -65,7 +67,7 @@ def _relative(path) -> str:
     return path.relative_to(config.ROOT).as_posix()
 
 
-def _url(path) -> str:
+def output_url(path) -> str:
     """Address of a file under outputs/, served by the app's /outputs route."""
     return "/outputs/" + quote(path.relative_to(config.OUTPUT_DIR).as_posix())
 
@@ -87,6 +89,8 @@ def _table(key: str) -> tuple[list[dict], list[dict], str]:
         source = _relative(path)
     columns = [
         {"name": column, "id": column, "type": "numeric", "format": NUMBER}
+        if pd.api.types.is_float_dtype(frame[column])
+        else {"name": column, "id": column, "type": "numeric"}
         if pd.api.types.is_numeric_dtype(frame[column]) else {"name": column, "id": column}
         for column in frame.columns
     ]
@@ -103,7 +107,7 @@ def _figures() -> list:
         if not path.exists():
             continue
         # The modification time busts the browser cache exactly when the file changes.
-        src = f"{_url(path)}?v={path.stat().st_mtime_ns}"
+        src = f"{output_url(path)}?v={path.stat().st_mtime_ns}"
         cards.append(html.Figure([
             html.A(html.Img(src=src, style={"width": "100%", "display": "block"}), href=src, target="_blank"),
             html.Figcaption(caption, style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),

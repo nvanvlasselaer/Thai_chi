@@ -20,6 +20,7 @@ from analysis.orientation import (
     get_nominal_sensor_quaternion,
     madgwick_imu,
     mean_quaternion,
+    mounting_matrix,
     quat_inverse,
     quat_multiply,
     quat_to_euler_deg,
@@ -28,19 +29,61 @@ from analysis.recordings import Recording, Selection, active
 
 
 @dataclass
+class Calibration:
+    """What a recording's own still moments say about its sensors.
+
+    Worked out from the raw data every time a recording is loaded -- it takes a
+    fraction of a second -- so it needs no cache and is always consistent with
+    the file it came from.
+    """
+
+    neutral: tuple[int, int]
+    """The neutral-pose window every orientation is referenced to (sample indices)."""
+    quiet_spans: list[tuple[int, int]]
+    """The stillest 10 s near the start and near the end, where the gyroscope bias is read."""
+    gyro_bias_dps: dict[str, np.ndarray]
+    """Per sensor, the gyroscope reading while standing still, subtracted from every angular speed."""
+    bias_drift_dps: dict[str, float]
+    """Per sensor, how far the start and end estimates of the bias are apart."""
+    bias_scatter_dps: dict[str, float]
+    """Per sensor, the scatter of 1 s medians within the quiet spans: what a difference is judged against."""
+    up_ref: dict[str, np.ndarray]
+    """Per sensor, the upward direction in its neutral body frame (unit vector)."""
+    g_ref: dict[str, float]
+    """Per sensor, the size of the accelerometer reading in the neutral pose (g)."""
+
+    def warnings(self, sensors: tuple[str, ...] = ("lumbar", "chestbone")) -> list[str]:
+        """Sensors whose start and end bias disagree by more than the scatter allows."""
+        return [
+            f"{sensor}: gyroscope bias differs by {self.bias_drift_dps[sensor]:.2f} deg/s between the "
+            f"start and the end of the recording (scatter {self.bias_scatter_dps[sensor]:.2f} deg/s); "
+            "it may not start and end with the participant standing still"
+            for sensor in sensors
+            if sensor in self.bias_drift_dps and self.bias_drift_dps[sensor] > 2.0 * self.bias_scatter_dps[sensor]
+        ]
+
+
+@dataclass
 class Kinematics:
     """Orientation-derived kinematics of one recording, at the source sampling rate.
 
     Per sensor: body-frame quaternions (wxyz), xyz Euler angles and the
-    gyroscope magnitude (deg/s).  ``trunk_rel_euler_deg`` is the chest relative
-    to the pelvis (lumbar sensor); each joint field is its distal segment
-    relative to its proximal one, per :data:`JOINT_SENSOR_PAIRS`.
+    gyroscope magnitude (deg/s).  ``omega_mag`` has the gyroscope bias removed
+    (:class:`Calibration`); ``omega_raw_mag`` keeps it, for the v1 detectors
+    only, whose windows were found on it.  ``trunk_rel_euler_deg`` is the chest
+    relative to the pelvis (lumbar sensor); each joint field is its distal
+    segment relative to its proximal one, per :data:`JOINT_SENSOR_PAIRS`.
+
+    The body frame is x = mediolateral (the flexion/extension axis), y =
+    anteroposterior, z = vertical: see :func:`analysis.orientation.mounting_matrix`.
     """
 
     t: np.ndarray
     quaternions: dict[str, np.ndarray]
     eulers_deg: dict[str, np.ndarray]
     omega_mag: dict[str, np.ndarray]
+    omega_raw_mag: dict[str, np.ndarray]
+    calibration: Calibration
     trunk_rel_euler_deg: np.ndarray
     left_knee_deg: np.ndarray
     right_knee_deg: np.ndarray
@@ -112,6 +155,74 @@ def find_neutral_pose_window(trial: TrialData, min_duration_s: float = 2.0) -> t
     return best_start, best_end
 
 
+QUIET_SPAN_S = 10.0
+"""Length of each span the gyroscope bias is read from.  The 2 s neutral window
+is too short: the sternum sensor moves with breathing (0.13-0.33 Hz here), and
+a 2 s median caught 2.9 deg/s of it on the chest's vertical axis.  10 s spans
+one to three breaths."""
+
+QUIET_SEARCH_S = 60.0
+"""How far into the start and the end of a recording the quiet span is sought."""
+
+
+def quiet_standing_spans(trial: TrialData, n: int) -> list[tuple[int, int]]:
+    """The stillest :data:`QUIET_SPAN_S` near the start and near the end of a recording.
+
+    Stillness is the rolling mean of the raw angular power summed over every
+    sensor.  A constant bias only adds a constant to that, so the quietest span
+    is found correctly before the bias is known.  Both recordings here stand
+    still for well over 10 s before and after the form.
+    """
+    fs = trial.fs
+    width = int(round(QUIET_SPAN_S * fs))
+    if n < 2 * width:
+        return [find_neutral_pose_window(trial)]
+    power = np.zeros(n)
+    for sensor in trial.sensors:
+        gyro = trial.data[sensor][GYRO_COLUMNS].to_numpy()[:n]
+        power += np.nansum(gyro ** 2, axis=1)
+    rolling = pd.Series(power).rolling(width).mean().to_numpy()
+
+    def stillest(lo: int, hi: int) -> tuple[int, int]:
+        ends = np.arange(lo + width - 1, hi)
+        end = int(ends[np.nanargmin(rolling[ends])])
+        return end - width + 1, end + 1
+
+    search = min(n, int(round(QUIET_SEARCH_S * fs)))
+    first = stillest(0, max(search, width))
+    last = stillest(min(n - search, n - width), n)
+    return [first] if last[0] < first[1] else [first, last]
+
+
+def calibrate(trial: TrialData, n: int) -> Calibration:
+    """Gyroscope bias from the quiet spans, and each sensor's vertical in the neutral pose."""
+    fs = trial.fs
+    neutral = find_neutral_pose_window(trial)
+    spans = quiet_standing_spans(trial, n)
+    block = max(1, int(round(fs)))
+
+    bias, drift, scatter, up_ref, g_ref = {}, {}, {}, {}, {}
+    for sensor in trial.sensors:
+        gyro = trial.data[sensor][GYRO_COLUMNS].to_numpy()[:n]
+        pieces = [gyro[start:end] for start, end in spans]
+        bias[sensor] = np.nanmedian(np.vstack(pieces), axis=0)
+        per_span = [np.nanmedian(piece, axis=0) for piece in pieces]
+        drift[sensor] = float(np.linalg.norm(per_span[-1] - per_span[0]))
+        medians = np.vstack([
+            np.nanmedian(piece[i:i + block], axis=0)
+            for piece in pieces for i in range(0, len(piece) - block + 1, block)
+        ])
+        scatter[sensor] = float(np.linalg.norm(np.nanstd(medians, axis=0)))
+
+        acc = trial.data[sensor][ACC_COLUMNS].to_numpy()[:n] @ mounting_matrix(sensor).T
+        mean_acc = np.nanmean(acc[neutral[0]:neutral[1]], axis=0)
+        g_ref[sensor] = float(np.linalg.norm(mean_acc))
+        up_ref[sensor] = mean_acc / g_ref[sensor]
+
+    return Calibration(neutral=neutral, quiet_spans=spans, gyro_bias_dps=bias, bias_drift_dps=drift,
+                       bias_scatter_dps=scatter, up_ref=up_ref, g_ref=g_ref)
+
+
 def sensor_signals(trial: TrialData) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Accelerometer (g) and gyroscope (deg/s) samples per sensor, cut to a common length.
 
@@ -140,7 +251,7 @@ def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None
     n = min(len(df) for df in trial.data.values())
     t = trial.data[trial.sensors[0]]["time"].to_numpy()[:n]
     quats = {}
-    omega_mag = {}
+    gyros = {}
 
     neutral_start, neutral_end = find_neutral_pose_window(trial)
 
@@ -158,9 +269,9 @@ def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None
         step1 = quat_multiply(q_nom, q_O_inv)
         step2 = quat_multiply(step1, sensor_quats)
         quats[sensor] = quat_multiply(step2, q_nom_inv)
-        omega_mag[sensor] = np.linalg.norm(gyro, axis=1)
+        gyros[sensor] = gyro
 
-    return kinematics_from_quaternions(t, quats, omega_mag)
+    return kinematics_from_quaternions(t, quats, gyros, calibrate(trial, n))
 
 
 # ---------------------------------------------------------------------------
@@ -174,14 +285,23 @@ def relative_euler(quats: dict[str, np.ndarray], proximal: str, distal: str) -> 
 
 
 def kinematics_from_quaternions(
-    t: np.ndarray, quats: dict[str, np.ndarray], omega_mag: dict[str, np.ndarray]
+    t: np.ndarray, quats: dict[str, np.ndarray], gyro_dps: dict[str, np.ndarray], calibration: Calibration
 ) -> Kinematics:
-    """Derive every segment and joint angle from body-frame quaternions."""
+    """Derive every segment and joint angle from body-frame quaternions.
+
+    ``gyro_dps`` is the raw gyroscope signal per sensor; its magnitude is taken
+    with and without the calibration's bias.
+    """
     return Kinematics(
         t=t,
         quaternions=quats,
         eulers_deg={sensor: quat_to_euler_deg(q) for sensor, q in quats.items()},
-        omega_mag=omega_mag,
+        omega_mag={
+            sensor: np.linalg.norm(gyro - calibration.gyro_bias_dps[sensor], axis=1)
+            for sensor, gyro in gyro_dps.items()
+        },
+        omega_raw_mag={sensor: np.linalg.norm(gyro, axis=1) for sensor, gyro in gyro_dps.items()},
+        calibration=calibration,
         trunk_rel_euler_deg=relative_euler(quats, "lumbar", "chestbone"),
         **{
             field: relative_euler(quats, proximal, distal)
@@ -239,11 +359,8 @@ def load_trial(recording: Recording, label: str) -> LoadedTrial:
             f"to {n}. The orientation cache is out of sync with the recording: preprocess it again."
         )
 
-    omega = {
-        sensor: np.linalg.norm(trial.data[sensor][GYRO_COLUMNS].to_numpy()[:n], axis=1)
-        for sensor in quats
-    }
-    kin = kinematics_from_quaternions(time_s, quats, omega)
+    gyros = {sensor: trial.data[sensor][GYRO_COLUMNS].to_numpy()[:n] for sensor in quats}
+    kin = kinematics_from_quaternions(time_s, quats, gyros, calibrate(trial, n))
     return LoadedTrial(label=label, kin=kin, trial=trial, fs=trial.fs, n_samples=n, recording=recording)
 
 

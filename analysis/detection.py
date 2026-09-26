@@ -14,20 +14,27 @@ The detectors here derive the boundaries from the motion instead:
   the trunk starts and stops turning, so the duration is measured rather than
   assumed.  Differentiating also removes the constant yaw drift that this
   6-axis (no magnetometer) dataset suffers from.
-* :func:`find_knee_flexion_windows` marks a monopodal stance wherever the knee
-  flexes past a threshold (60 deg by default) for long enough.
-* :func:`detect_yaw_cycle_segments` cuts the whole form into parts at the
-  neutral crossings of the chest yaw, for the sequence-smoothness family.
+* :func:`find_single_leg_phases` marks a single-leg stance wherever one foot is
+  clearly higher than the other, from the tilt of both thighs and shanks
+  (:func:`analysis.gravity.leg_lift_index`).  It finds the whole support phase
+  of a lift with the knee extended as well as flexed, and which leg is up.
+  The original knee-flexion > 60 deg rule, :func:`find_knee_flexion_windows`,
+  is still selectable: it split every kick in two where the knee extended.
+* :func:`detect_yaw_turns` cuts the whole form into single-direction turns of
+  the chest, from one turning point of the yaw to the next, for the
+  sequence-smoothness family.  A turn starts and ends at rest, which is what
+  SPARC and the submovement count assume.
 * :func:`find_stabilization` scores candidate quiet windows by how quiet they
   are *relative to the whole recording* and how soon they follow the event, and
-  reports a quiet ratio so a window that is not actually quiet can be flagged
-  rather than silently used.
+  reports how quiet the window is so one that is not actually quiet can be
+  flagged rather than silently used.
 
-:func:`pair_trunk_events` then matches the k-th novice rotation to the k-th
-trained one.  The signals the detectors threshold on are exposed
-(:func:`trunk_yaw_envelope`, :func:`combined_omega`, :func:`chest_yaw_signals`),
-so a user interface can draw the envelope and the threshold next to the detected
-band and show *why* a boundary landed where it did.
+Novice and trained events are paired through the whole-recording alignment
+(:mod:`analysis.alignment`), never by their order.  The signals the detectors
+threshold on are exposed (:func:`trunk_yaw_envelope`, :func:`combined_omega`,
+:func:`chest_yaw_signals`, :func:`lift_signal`), so a user interface can draw
+the signal and the threshold next to the detected band and show *why* a
+boundary landed where it did.
 """
 
 
@@ -39,6 +46,8 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
+from analysis.alignment import Alignment, match_windows
+from analysis.gravity import leg_lift_index
 from analysis.kinematics import Kinematics
 from analysis.signals import extract_contiguous_runs, highpass_detrend, lowpass_signal
 
@@ -69,49 +78,60 @@ class TrunkDetectorParams:
 
 @dataclass
 class KneeDetectorParams:
-    """Tunable parameters for monopodal-stance detection.
+    """Tunable parameters for single-leg (monopodal) stance detection.
 
-    Mirrors the arguments of ``find_knee_flexion_windows`` so the thresholds
-    that define a single-leg stance can be adjusted from the interface rather
-    than being fixed in code.
+    ``method="lift"`` finds the stance from the leg lift index -- one foot
+    higher than the other -- and is the default.  ``"knee_threshold"`` is the
+    original rule, knee flexion above ``threshold_deg``, kept so v1 sessions
+    reproduce; it cannot see a lift with the knee extended, and splits a kick
+    where the knee straightens.
     """
 
+    method: str = "lift"
+    """``"lift"`` or ``"knee_threshold"``."""
+    lift_min_peak: float = 0.25
+    """How far a foot must rise for a stance to count, in thigh lengths (about
+    10 cm): a physical definition of "clearly off the floor".  The single-leg
+    phases here peak at 0.9-1.6; stepping and weight shifts stay below 0.1."""
+    lift_rel_threshold: float = 0.15
+    """Onset and offset, as a fraction of the event's own peak lift -- the same
+    rule the trunk detector uses on its velocity envelope."""
+    lift_min_duration_s: float = 0.5
     threshold_deg: float = 60.0
-    """Knee flexion magnitude above which the stance counts as monopodal."""
+    """``knee_threshold`` only: flexion above which the stance counts as monopodal."""
     min_duration_s: float = 0.4
+    """``knee_threshold`` only."""
     merge_gap_s: float = 0.2
-    """Sub-threshold dips shorter than this do not split one event into two."""
+    """``knee_threshold`` only: sub-threshold dips shorter than this do not split an event."""
 
 
 @dataclass
 class SegmentDetectorParams:
-    """Tunable parameters for :func:`detect_yaw_cycle_segments`.
+    """Tunable parameters for :func:`detect_yaw_turns`.
 
     The Tai Chi form is carried by large chest yaw rotations: the chest turns
-    one way, back through neutral, then the other way.  Cutting the recording at
-    those neutral crossings gives comparable parts of the sequence without
-    hand-picking events, which is what the smoothness family is scored over.
+    one way, then the other.  Each turn, from one turning point of the yaw to
+    the next, starts and ends with the chest momentarily still, so it is a
+    discrete movement in the sense the smoothness measures assume.  (The
+    earlier unit, cut at the neutral crossings, started and ended at peak
+    turning speed.)
     """
 
-    half_cycles: bool = False
-    """``False`` = one segment per full back-and-forth, ``True`` = one per
-    single-direction excursion."""
     yaw_cutoff_hz: float = 0.5
     """Smoothing applied before the turns are located.  Low, because only the
-    carrier oscillation defines a segment, not the detail riding on it."""
+    carrier oscillation defines a turn, not the detail riding on it."""
     min_lobe_deg: float = 10.0
     """How far the chest must turn from neutral for a swing to count as one.
     The real turns here reach 40-70 deg, so this mainly rejects the chest
     hovering near neutral during the still passages of the form."""
     min_lobe_separation_s: float = 1.5
-    """Minimum spacing between successive turns, as for the trunk detector."""
+    """Minimum spacing between successive turning points, as for the trunk detector."""
     min_excursion_deg: float = 10.0
-    min_duration_s: float = 2.0
-    max_duration_s: float = 20.0
-    """Segments longer than this span a pause rather than a movement.  Both
-    recordings stand still for ~18 s at the start, ~35 s at the end and ~40 s in
-    the middle; without this cap the turns either side of a pause are joined
-    into one 30 s "cycle" that is mostly not moving."""
+    min_duration_s: float = 1.0
+    max_duration_s: float = 15.0
+    """A turn longer than this spans a pause rather than a movement: the turns
+    here last 2.5-13 s, and both recordings stand still for ~20 s at the start
+    and end and hold the single-leg passage for ~35 s in the middle."""
 
 
 @dataclass
@@ -120,18 +140,33 @@ class StabilizationParams:
 
     Shared by both event families: the settling window is found the same way
     whether it follows a trunk rotation or a single-leg stance.
+
+    Quietness is measured on the bias-corrected angular speed as
+    ``z = (mean - baseline) / spread``, where the baseline is the recording's
+    20th percentile and the spread the distance from there to its median.  So
+    z = 0 is as quiet as the quietest fifth of the recording and z = 1 as busy
+    as its median moment, whatever the participant's overall level or the
+    sensors' bias.  (Before the gyroscope bias was removed the baseline was
+    mostly bias -- about 21 deg/s of it -- and the ratio to it could not tell a
+    settled window from an active one.)
     """
 
     min_duration_s: float = 3.0
     """Stabilization window length.  The pipeline used 2 s; measured against
-    +/-0.25 s boundary jitter, the sway metrics' reliability rises from
+    +/-0.25 s boundary jitter, the sway metrics' reliability rose from
     ICC 0.87 at 2 s to 0.96 at 3 s (0.99 at 4-5 s, but a longer window starts
     running into the next movement)."""
     horizon_s: float = 10.0
-    latency_weight: float = 0.35
-    """Penalty per second of delay after the event, in quiet-ratio units."""
+    latency_weight: float = 0.65
+    """Penalty per second of delay after the event, in units of z.  0.65 is
+    the trade-off the original ratio score made, expressed on the corrected
+    signal: it reproduces 19 of 20 of the earlier automatic placements to within
+    0.25 s."""
     baseline_percentile: float = 20.0
-    low_confidence_ratio: float = 1.6
+    scale_percentile: float = 50.0
+    low_confidence_z: float = 1.0
+    """A window busier than the recording's median moment is flagged: whoever
+    it follows, the participant had not settled."""
     omega_cutoff_hz: float = 4.0
 
 
@@ -172,7 +207,9 @@ class StabilizationResult:
     start: int
     end: int
     quiet_ratio: float
-    """Window mean angular velocity divided by the recording quiet baseline."""
+    """Window mean angular speed divided by the recording's quiet baseline."""
+    quiet_z: float
+    """``(window mean - baseline) / spread``: 0 = the recording's quietest fifth, 1 = its median."""
     status: str
     """``"ok"``, ``"low-confidence"`` or ``"out-of-range"``."""
 
@@ -187,16 +224,42 @@ class StabilizationDiagnostics:
 
     combined_omega_dps: np.ndarray
     baseline_dps: float
+    scale_dps: float
+    """Median minus baseline: the spread quietness is measured in."""
+
+    def quiet_z(self, mean_dps: float) -> float:
+        return float((mean_dps - self.baseline_dps) / max(self.scale_dps, 1e-9))
 
 
 @dataclass
 class SegmentDiagnostics:
-    """Signals the segment detector thresholded on, for plotting."""
+    """Signals the turn detector thresholded on, for plotting."""
 
     chest_yaw_deg: np.ndarray
     pelvis_yaw_deg: np.ndarray
     smoothed_yaw_deg: np.ndarray
     min_lobe_deg: float
+
+
+@dataclass
+class LiftDiagnostics:
+    """The signal the single-leg detector thresholded on, for plotting."""
+
+    lift_index: np.ndarray
+    """Left ankle height minus right, in thigh lengths (positive: left foot up)."""
+    floor: float
+    """The double-support level of |lift index|: no boundary is placed below it."""
+    min_peak: float
+
+
+@dataclass
+class Turn:
+    """One single-direction turn of the chest, in sample indices."""
+
+    start: int
+    end: int
+    direction: int
+    """+1 when the yaw increases through the turn, -1 when it decreases."""
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +295,10 @@ def trunk_yaw_envelope(
     )
 
 
-def detect_trunk_rotation_events(
+def trunk_rotation_candidates(
     kin: Kinematics, fs: float, params: TrunkDetectorParams | None = None
 ) -> tuple[list[TrunkEvent], TrunkDiagnostics]:
-    """Detect trunk-rotation events with boundaries taken from the movement.
+    """Every rotation the envelope supports, before the ``n_events`` cut.
 
     Each peak in the yaw-velocity envelope is a candidate rotation.  From the
     peak the search walks outward until the envelope falls below a threshold set
@@ -243,6 +306,7 @@ def detect_trunk_rotation_events(
     one are both bracketed at the same relative point — but never below a
     recording-wide floor, which stops the walk running away through a quiet
     stretch.  The resulting windows have whatever duration the movement had.
+    Returned in time order.
     """
     params = params or TrunkDetectorParams()
     diagnostics = trunk_yaw_envelope(kin, fs, params)
@@ -283,15 +347,30 @@ def detect_trunk_rotation_events(
                 score=excursion * float(np.log1p(envelope[peak])),
             )
         )
+    return candidates, diagnostics
 
-    candidates.sort(key=lambda event: -event.score)
-    selected: list[TrunkEvent] = []
-    for candidate in candidates:
-        if all(candidate.end < kept.start or candidate.start > kept.end for kept in selected):
-            selected.append(candidate)
-        if len(selected) == params.n_events:
+
+def _strongest_disjoint(items: list, score, n: int, spans) -> list:
+    """The ``n`` highest-scoring items whose spans do not overlap."""
+    selected: list = []
+    for item in sorted(items, key=lambda item: -score(item)):
+        if all(all(a_end < b_start or a_start > b_end
+                   for (a_start, a_end), (b_start, b_end) in zip(spans(item), spans(kept)))
+               for kept in selected):
+            selected.append(item)
+        if len(selected) == n:
             break
+    return selected
 
+
+def detect_trunk_rotation_events(
+    kin: Kinematics, fs: float, params: TrunkDetectorParams | None = None
+) -> tuple[list[TrunkEvent], TrunkDiagnostics]:
+    """The ``n_events`` strongest non-overlapping rotations of one recording, in time order."""
+    params = params or TrunkDetectorParams()
+    candidates, diagnostics = trunk_rotation_candidates(kin, fs, params)
+    selected = _strongest_disjoint(candidates, lambda event: event.score, params.n_events,
+                                   lambda event: [(event.start, event.end)])
     selected.sort(key=lambda event: event.start)
     return selected, diagnostics
 
@@ -343,6 +422,67 @@ def find_knee_flexion_windows(
             windows.append((start, end))
 
     return windows, flexion_mag
+
+
+LIFT_CUTOFF_HZ = 2.0
+"""Smoothing of the lift index: a lift lasts seconds, and above ~2 Hz the index
+only carries soft-tissue and orientation-filter noise."""
+
+
+def lift_signal(kin: Kinematics, fs: float, params: KneeDetectorParams | None = None) -> LiftDiagnostics:
+    """The lift index the single-leg detector works on, with its floor.
+
+    The floor is the recording's median |lift index|: most of any Tai Chi
+    recording is spent with both feet down, so the median is the double-support
+    level (0.03 thigh lengths here), and no boundary is walked below it.
+    """
+    params = params or KneeDetectorParams()
+    lift = lowpass_signal(leg_lift_index(kin), fs, cutoff_hz=LIFT_CUTOFF_HZ)
+    return LiftDiagnostics(lift_index=lift, floor=float(np.median(np.abs(lift))),
+                           min_peak=float(params.lift_min_peak))
+
+
+def find_single_leg_phases(
+    kin: Kinematics, fs: float, params: KneeDetectorParams | None = None,
+    diagnostics: LiftDiagnostics | None = None,
+) -> list[tuple[int, int, str]]:
+    """Single-leg support phases as ``(start, end, lifted_leg)``, in time order.
+
+    Every peak of |lift index| above ``lift_min_peak`` is a lift.  From the peak
+    the boundaries walk outward to where the lift falls below
+    ``lift_rel_threshold`` of the peak's own height, never below the
+    double-support floor, so each phase runs from lift-off to touch-down
+    whatever the knee does in between.  The sign of the index at the peak says
+    which leg is up.
+    """
+    params = params or KneeDetectorParams()
+    diagnostics = diagnostics or lift_signal(kin, fs, params)
+    lift = diagnostics.lift_index
+    magnitude = np.abs(lift)
+    peaks, _ = find_peaks(magnitude, height=params.lift_min_peak, distance=max(1, int(2.0 * fs)))
+
+    phases: list[tuple[int, int, str]] = []
+    for peak in peaks:
+        threshold = max(params.lift_rel_threshold * magnitude[peak], diagnostics.floor)
+        start = end = int(peak)
+        while start > 0 and magnitude[start] > threshold:
+            start -= 1
+        while end < len(magnitude) - 1 and magnitude[end] > threshold:
+            end += 1
+        if (end - start) / fs < params.lift_min_duration_s:
+            continue
+        leg = "Left" if lift[peak] > 0 else "Right"
+        if phases and start <= phases[-1][1] and phases[-1][2] == leg:
+            phases[-1] = (phases[-1][0], max(end, phases[-1][1]), leg)  # two humps of one lift
+            continue
+        phases.append((start, end, leg))
+    return phases
+
+
+def peak_lift_index(lift: np.ndarray, start: int, end: int, leg: str) -> int:
+    """Sample of the highest lift of ``leg``'s foot inside a window."""
+    signed = lift[start:end] if leg == "Left" else -lift[start:end]
+    return start + int(np.argmax(signed)) if len(signed) else start
 
 
 # ---------------------------------------------------------------------------
@@ -406,55 +546,44 @@ def _turning_points(
     return alternating
 
 
-def _neutral_between(signal: np.ndarray, first: int, second: int) -> int:
-    """Where the yaw passes neutral between two opposing turns."""
-    span = signal[first:second + 1]
-    crossings = np.where(np.diff(np.sign(span)) != 0)[0]
-    if len(crossings):
-        return first + int(crossings[0]) + 1
-    # No sign change: the oscillation never quite reached neutral.  The closest
-    # approach is the boundary, which keeps the detector working whatever the
-    # high-pass leaves behind.
-    return first + int(np.argmin(np.abs(span)))
-
-
-def detect_yaw_cycle_segments(
+def yaw_turning_points(
     kin: Kinematics, fs: float, params: SegmentDetectorParams | None = None
 ) -> tuple[list[tuple[int, int]], SegmentDiagnostics]:
-    """Cut the recording into parts at the neutral crossings of the chest yaw.
-
-    Boundaries are placed where the yaw passes neutral between two opposing
-    turns, so the interval between consecutive boundaries is exactly one
-    single-direction excursion: a full back-and-forth spans two of them, a half
-    cycle one.  Segments too short, too small or too long to be one part of the
-    form are dropped rather than reported with numbers that do not mean
-    anything -- in particular the duration cap is what stops the turns either
-    side of a pause in the form being joined into one very long "cycle".
-    """
+    """The chest yaw's turning points as ``(index, direction)``, and the signals behind them."""
     params = params or SegmentDetectorParams()
     diagnostics = chest_yaw_signals(kin, fs, params)
-    smoothed = diagnostics.smoothed_yaw_deg
+    return _turning_points(diagnostics.smoothed_yaw_deg, fs, params), diagnostics
 
-    turns = _turning_points(smoothed, fs, params)
-    boundaries = [
-        _neutral_between(smoothed, first, second)
-        for (first, _), (second, _) in zip(turns[:-1], turns[1:])
-    ]
 
-    step = 1 if params.half_cycles else 2
-    spans = [
-        (boundaries[i], boundaries[i + step])
-        for i in range(0, len(boundaries) - step, step)
-    ]
+def turn_between(first: tuple[int, int], second: tuple[int, int], chest_yaw: np.ndarray, fs: float,
+                 params: SegmentDetectorParams) -> Turn | None:
+    """The turn from one turning point to another, or None if it cannot be one part of the form.
 
-    chest = diagnostics.chest_yaw_deg
-    segments = [
-        (start, end)
-        for start, end in spans
-        if params.min_duration_s <= (end - start) / fs <= params.max_duration_s
-        and float(np.ptp(chest[start:end])) >= params.min_excursion_deg
-    ]
-    return segments, diagnostics
+    Too short, too small or too long a span is dropped rather than reported
+    with numbers that do not mean anything -- the duration cap in particular
+    stops the turns either side of a pause being read as one slow turn.
+    """
+    (start, _), (end, direction) = first, second
+    if not params.min_duration_s <= (end - start) / fs <= params.max_duration_s:
+        return None
+    if float(np.ptp(chest_yaw[start:end])) < params.min_excursion_deg:
+        return None
+    return Turn(start=int(start), end=int(end), direction=int(direction))
+
+
+def detect_yaw_turns(
+    kin: Kinematics, fs: float, params: SegmentDetectorParams | None = None
+) -> tuple[list[Turn], SegmentDiagnostics]:
+    """Cut the recording into single-direction turns of the chest.
+
+    Each turn runs from one turning point of the (smoothed) chest yaw to the
+    next, so it starts and ends with the chest momentarily still and turns one
+    way throughout.  Consecutive turns abut.
+    """
+    params = params or SegmentDetectorParams()
+    points, diagnostics = yaw_turning_points(kin, fs, params)
+    turns = [turn_between(a, b, diagnostics.chest_yaw_deg, fs, params) for a, b in zip(points[:-1], points[1:])]
+    return [turn for turn in turns if turn is not None], diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +603,11 @@ def combined_omega(
     combined = lowpass_signal(
         kin.omega_mag["lumbar"], fs, cutoff_hz=params.omega_cutoff_hz
     ) + lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=params.omega_cutoff_hz)
+    baseline, middle = np.percentile(combined, [params.baseline_percentile, params.scale_percentile])
     return StabilizationDiagnostics(
         combined_omega_dps=combined,
-        baseline_dps=float(np.percentile(combined, params.baseline_percentile)),
+        baseline_dps=float(baseline),
+        scale_dps=float(middle - baseline),
     )
 
 
@@ -489,16 +620,19 @@ def find_stabilization(
 ) -> StabilizationResult:
     """Find the quiet window that follows an event, and say how quiet it is.
 
-    Every candidate window in the horizon is scored as ``mean omega / baseline +
-    latency_weight * latency``.  The first term asks whether the participant is
-    quiet compared to the rest of *their own recording* rather than compared to a
-    local percentile that always admits something; the second encodes that
-    stabilization is what follows the event, which stops the search drifting to a
-    quieter moment many seconds later.
+    Every candidate window in the horizon is scored as ``z + latency_weight *
+    latency``, with z the window's quietness relative to the rest of *their own
+    recording* (:class:`StabilizationParams`) rather than to a local percentile
+    that always admits something; the latency term encodes that stabilization
+    is what follows the event, which stops the search drifting to a quieter
+    moment many seconds later.
 
     A plain global threshold was tried first and rejected: it removed the
     degenerate windows but pushed latencies out to 9-10 s, because in continuous
-    Tai Chi there is never a genuinely still 2 s.
+    Tai Chi there is never a genuinely still 2 s.  Nor is there, it turns out,
+    after a trunk rotation: once the gyroscope bias is removed, 10 of the 12
+    windows after the current trunk events are busier than the recording's
+    median moment.  They are post-rotation windows, and flagged as such.
     """
     params = params or StabilizationParams()
     diagnostics = diagnostics or combined_omega(kin, fs, params)
@@ -513,23 +647,26 @@ def find_stabilization(
         start = min(search_start, max(0, len(combined) - need))
         end = min(start + need, len(combined))
         window = combined[start:end]
-        ratio = float(np.mean(window) / baseline) if len(window) else float("nan")
-        return StabilizationResult(start, end, ratio, "out-of-range")
+        mean = float(np.mean(window)) if len(window) else float("nan")
+        return StabilizationResult(start, end, mean / baseline, diagnostics.quiet_z(mean), "out-of-range")
 
     rolling = pd.Series(combined[search_start:search_end]).rolling(need).mean().to_numpy()
     latency_s = (np.arange(len(rolling)) - need + 1) / fs
-    score = np.where(
-        np.isfinite(rolling),
-        rolling / baseline + params.latency_weight * latency_s,
-        np.inf,
-    )
+    z = (rolling - diagnostics.baseline_dps) / max(diagnostics.scale_dps, 1e-9)
+    score = np.where(np.isfinite(rolling), z + params.latency_weight * latency_s, np.inf)
 
     best = int(np.argmin(score))
     start = search_start + best - need + 1
     end = search_start + best + 1
-    ratio = float(rolling[best] / baseline)
-    status = "ok" if ratio <= params.low_confidence_ratio else "low-confidence"
-    return StabilizationResult(start, end, ratio, status)
+    quiet_z = float(z[best])
+    status = "ok" if quiet_z <= params.low_confidence_z else "low-confidence"
+    return StabilizationResult(start, end, float(rolling[best] / baseline), quiet_z, status)
+
+
+def window_quietness(diagnostics: StabilizationDiagnostics, start: int, end: int) -> tuple[float, float]:
+    """``(quiet_ratio, quiet_z)`` of an arbitrary window, e.g. one placed by hand."""
+    mean = float(np.mean(diagnostics.combined_omega_dps[start:end])) if end > start else float("nan")
+    return mean / max(diagnostics.baseline_dps, 1e-9), diagnostics.quiet_z(mean)
 
 
 # ---------------------------------------------------------------------------
@@ -542,48 +679,49 @@ def pair_trunk_events(
     trained_kin: Kinematics,
     novice_fs: float,
     trained_fs: float,
+    alignment: Alignment,
     trunk_params: TrunkDetectorParams | None = None,
     stab_params: StabilizationParams | None = None,
-) -> tuple[dict[str, list[tuple[int, int, int, int, float]]], list[TrunkEvent], list[TrunkEvent]]:
-    """Detect trunk events in both recordings and pair them by order.
+) -> tuple[dict[str, list[tuple[int, int, int, int, float, float]]], list[TrunkEvent], list[TrunkEvent]]:
+    """Detect trunk rotations in both recordings and pair those that are the same movement.
 
-    Both participants perform the same form, so the k-th rotation in one
-    recording corresponds to the k-th in the other.  Pairing by order is used
-    rather than the DTW search because velocity-segmented events are only a few
-    seconds long, and a short window is not distinctive enough for the DTW to
-    match reliably -- a single mismatch then propagates, because the search is
-    constrained to move forward monotonically.  Any mispairing that does occur
-    is visible and correctable in the editor.
+    Every candidate rotation of each recording is carried onto the other's
+    clock by the whole-recording alignment.  A novice and a trained candidate
+    pair when each is the other's best match by intersection over union, at
+    0.5 or more; the ``n_events`` pairs whose weaker partner is strongest are
+    kept.  Pairing by order, which this replaces, compared a different movement
+    in all six pairs of the working session: the top six rotations of one
+    recording are not the top six of the other.
 
-    Each entry is ``(event_start, event_end, stab_start, stab_end, quiet_ratio)``.
+    Each window entry is ``(event_start, event_end, stab_start, stab_end,
+    quiet_ratio, quiet_z)``.
     """
     trunk_params = trunk_params or TrunkDetectorParams()
     stab_params = stab_params or StabilizationParams()
 
-    novice_events, _ = detect_trunk_rotation_events(novice_kin, novice_fs, trunk_params)
-    trained_events, _ = detect_trunk_rotation_events(trained_kin, trained_fs, trunk_params)
+    novice_all, _ = trunk_rotation_candidates(novice_kin, novice_fs, trunk_params)
+    trained_all, _ = trunk_rotation_candidates(trained_kin, trained_fs, trunk_params)
+    matches = match_windows(
+        alignment,
+        [(e.start / novice_fs, e.end / novice_fs) for e in novice_all],
+        [(e.start / trained_fs, e.end / trained_fs) for e in trained_all],
+    )
+    pairs = [(novice_all[i], trained_all[j]) for i, j in matches]
+    pairs = _strongest_disjoint(pairs, lambda pair: min(pair[0].score, pair[1].score), trunk_params.n_events,
+                                lambda pair: [(pair[0].start, pair[0].end), (pair[1].start, pair[1].end)])
+    pairs.sort(key=lambda pair: pair[0].start)
 
-    novice_omega = combined_omega(novice_kin, novice_fs, stab_params)
-    trained_omega = combined_omega(trained_kin, trained_fs, stab_params)
-
-    windows: dict[str, list[tuple[int, int, int, int, float]]] = {"Novice": [], "Trained": []}
-    for events, kin, fs, omega, label in (
-        (novice_events, novice_kin, novice_fs, novice_omega, "Novice"),
-        (trained_events, trained_kin, trained_fs, trained_omega, "Trained"),
-    ):
-        for event in events:
+    windows: dict[str, list[tuple[int, int, int, int, float, float]]] = {"Novice": [], "Trained": []}
+    for label, kin, fs, side in (("Novice", novice_kin, novice_fs, 0), ("Trained", trained_kin, trained_fs, 1)):
+        omega = combined_omega(kin, fs, stab_params)
+        for pair in pairs:
+            event = pair[side]
             stabilization = find_stabilization(kin, fs, event.end, stab_params, diagnostics=omega)
             windows[label].append(
                 (event.start, event.end, stabilization.start, stabilization.end,
-                 round(stabilization.quiet_ratio, 3))
+                 round(stabilization.quiet_ratio, 3), round(stabilization.quiet_z, 3))
             )
-
-    # Only complete pairs are usable, since every trunk metric is reported for
-    # both trials of the same event.
-    paired = min(len(windows["Novice"]), len(windows["Trained"]))
-    windows["Novice"] = windows["Novice"][:paired]
-    windows["Trained"] = windows["Trained"][:paired]
-    return windows, novice_events[:paired], trained_events[:paired]
+    return windows, [pair[0] for pair in pairs], [pair[1] for pair in pairs]
 
 
 # ---------------------------------------------------------------------------

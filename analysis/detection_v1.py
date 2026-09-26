@@ -4,14 +4,16 @@
 8 s sliding window with the largest trunk-pelvis yaw excursion, and each novice
 event is matched to the trained recording by banded dynamic time warping.
 :mod:`analysis.detection` replaces both with boundaries derived from the motion
-and pairing by order.
+and pairing through a whole-recording alignment.
 
-The v1 stabilization search, :func:`find_stabilization`, is also still what
-:func:`analysis.balance_metrics.compute_knee_balance_metrics` and
-:func:`analysis.figures.make_knee_traceability_figure` fall back to when no
-stabilization window is passed in -- which is how :mod:`analysis.pipeline` calls
-them, whatever ``DETECTOR`` is set to.  The editor passes one in, found by
-:func:`analysis.detection.find_stabilization`.
+The v1 stabilization search, :func:`find_stabilization`, places the settling
+window of a v1 session's single-leg stances too.
+
+Everything here reads ``Kinematics.omega_raw_mag``, the gyroscope magnitude with
+its bias still in, because that is what these detectors were designed and run
+on: a v1 session detected today gets exactly the original windows.  The
+metrics computed on those windows are the current ones; the original numbers
+come from the git tag ``metrics-v1``.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from analysis.signals import highpass_detrend, lowpass_signal
 def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: int = 3) -> tuple[list[tuple[int, int, int]], str]:
     z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
     z = lowpass_signal(z, fs, cutoff_hz=4.0)
-    chest_omega = lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=6.0)
+    chest_omega = lowpass_signal(kin.omega_raw_mag["chestbone"], fs, cutoff_hz=6.0)
     ignore = int(15 * fs)
     window = int(8 * fs)
     step = int(1 * fs)
@@ -73,8 +75,8 @@ def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: 
 
 
 def find_stabilization(kin: Kinematics, fs: float, after_end: int) -> tuple[int, int]:
-    lumbar = lowpass_signal(kin.omega_mag["lumbar"], fs, cutoff_hz=4.0)
-    chest = lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=4.0)
+    lumbar = lowpass_signal(kin.omega_raw_mag["lumbar"], fs, cutoff_hz=4.0)
+    chest = lowpass_signal(kin.omega_raw_mag["chestbone"], fs, cutoff_hz=4.0)
     combined = lumbar + chest
     search_start = after_end
     search_end = min(len(combined), after_end + int(10 * fs))
@@ -150,11 +152,11 @@ def precompute_signature_channels(kin: Kinematics, fs: float) -> SignatureChanne
     raw = [
         highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05),
         kin.eulers_deg["lumbar"][:, 0],
-        kin.omega_mag["chestbone"],
+        kin.omega_raw_mag["chestbone"],
         kin.left_knee_deg[:, 0],
         kin.right_knee_deg[:, 0],
-        kin.omega_mag["lhand"],
-        kin.omega_mag["rhand"],
+        kin.omega_raw_mag["lhand"],
+        kin.omega_raw_mag["rhand"],
     ]
     return SignatureChannels(
         time_s=kin.t,

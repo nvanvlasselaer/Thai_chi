@@ -1,85 +1,111 @@
-"""Balance metrics for trunk-rotation and monopodal-stance events.
+"""Balance metrics for trunk-rotation and single-leg-stance events.
 
 Each event has a movement window and a stabilization window that follows it.
-The movement window is scored for trunk-pelvis coordination and smoothness; the
-stabilization window for postural sway, orientation variability and corrective
-activity.  The third family, sequence segments, is scored in
-:mod:`analysis.smoothness_metrics`.
+The movement window is scored for trunk-pelvis coordination and smoothness --
+for a single-leg stance it is the support phase itself, lift-off to
+touch-down, and its sway is scored too -- and the stabilization window for
+postural sway, tilt and angular activity.  The third family, the turns of the
+sequence, is scored in :mod:`analysis.smoothness_metrics`.
+
+Sway is the lumbar acceleration with gravity removed, in the pelvis-heading
+frame (:func:`analysis.gravity.linear_acceleration`), reported as RMS about the
+window mean in m/s^2 -- x mediolateral, y anteroposterior.  Tilt is read from
+the vertical in the lumbar frame (:func:`analysis.gravity.tilt_deg`), not from
+Euler angles, so it contains no yaw.  Angular speeds have the gyroscope bias
+removed.  Each of those three was different before (Review.md): the
+acceleration variance was taken in sensor axes, where tilt-projected gravity
+was 2-30 times the sway, with its AP and ML labels swapped; the orientation
+"variability" was dominated by yaw; and the raw gyroscope magnitude carried
+6.6 deg/s of lumbar bias, enough to reverse which participant looked busier.
 """
 
 from __future__ import annotations
-
-import math
 
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
-from analysis.data_io import ACC_COLUMNS, TrialData
-from analysis.detection_v1 import find_stabilization as find_stabilization_v1
+from analysis import detection
+from analysis.data_io import TrialData
+from analysis.gravity import leg_lift_index, linear_acceleration, tilt_deg
 from analysis.kinematics import Kinematics
-from analysis.orientation import mounting_matrix
-from analysis.signals import cross_correlation_lag, highpass_detrend, lowpass_signal
-from analysis.smoothness_metrics import dimensionless_jerk
+from analysis.signals import lowpass_signal, pearson_lag
+from analysis.smoothness_metrics import sparc, turn_signals, yaw_lag
 
 
 # ---------------------------------------------------------------------------
-# Stabilization-window measures
+# Per-recording signals, computed once and shared by every event
+# ---------------------------------------------------------------------------
+
+
+def balance_signals(
+    kin: Kinematics, trial: TrialData, fs: float, stab_params: detection.StabilizationParams | None = None
+) -> dict[str, object]:
+    """Everything the balance metrics slice, for one recording."""
+    lumbar_sagittal, lumbar_frontal = tilt_deg(kin, "lumbar")
+    _, chest_frontal = tilt_deg(kin, "chestbone")
+    signals: dict[str, object] = dict(turn_signals(kin, trial, fs))
+    signals.update({
+        "sway": linear_acceleration(kin, trial, "lumbar"),
+        "lumbar_sagittal_tilt": lowpass_signal(lumbar_sagittal, fs, cutoff_hz=4.0),
+        "lumbar_frontal_tilt": lowpass_signal(lumbar_frontal, fs, cutoff_hz=4.0),
+        "chest_frontal_tilt": lowpass_signal(chest_frontal, fs, cutoff_hz=4.0),
+        "lumbar_omega": kin.omega_mag["lumbar"],
+        "lift": lowpass_signal(leg_lift_index(kin), fs, cutoff_hz=detection.LIFT_CUTOFF_HZ),
+        "stability": detection.combined_omega(kin, fs, stab_params),
+        "corrective_threshold": corrective_threshold(kin.omega_mag["lumbar"], fs),
+    })
+    return signals
+
+
+# ---------------------------------------------------------------------------
+# Window measures
 # ---------------------------------------------------------------------------
 
 
 def corrective_threshold(omega: np.ndarray, fs: float) -> float:
-    """Tukey outlier threshold on angular velocity: q75 + 1.5 IQR."""
+    """Tukey outlier threshold on the recording's angular speed: q75 + 1.5 IQR."""
     smoothed = lowpass_signal(omega, fs, cutoff_hz=6.0)
     q25, q75 = np.percentile(smoothed, [25, 75])
     return float(q75 + 1.5 * (q75 - q25))
 
 
-def count_corrective_peaks(omega: np.ndarray, fs: float, threshold: float | None = None) -> tuple[int, float]:
-    """Count angular-velocity bursts in a window.
-
-    With ``threshold=None`` the bar is computed from the window's own
-    distribution, which is self-referential: a window twice as busy gets a
-    threshold more than twice as high, so the count reports shape rather than
-    magnitude.  Passing a threshold derived from the whole recording
-    (``corrective_threshold`` over the full signal) makes counts comparable
-    between windows, trials and participants.  The default preserves the
-    original behaviour.
-    """
+def count_corrective_peaks(omega: np.ndarray, fs: float, threshold: float) -> int:
+    """Angular-speed bursts above a recording-wide threshold within a window."""
     smoothed = lowpass_signal(omega, fs, cutoff_hz=6.0)
-    if threshold is None:
-        threshold = np.percentile(smoothed, 75) + 1.5 * (np.percentile(smoothed, 75) - np.percentile(smoothed, 25))
-    peaks, props = find_peaks(smoothed, height=threshold, distance=int(0.3 * fs))
-    if len(peaks) == 0:
-        return 0, float(np.max(smoothed))
-    return int(len(peaks)), float(np.max(props["peak_heights"]))
+    peaks, _ = find_peaks(smoothed, height=threshold, distance=max(1, int(0.3 * fs)))
+    return int(len(peaks))
 
 
-def corrective_activity(kin: Kinematics, fs: float, stab: slice) -> dict[str, float]:
-    """Corrective-activity measures that are comparable across windows.
+def _rms_about_mean(values: np.ndarray) -> float:
+    return float(np.sqrt(np.mean((values - np.mean(values)) ** 2))) if len(values) else float("nan")
 
-    The raw peak count over a 2 s window is both duration-dependent and scored
-    against a bar that moves with the window, which makes it the least reliable
-    metric in the set (ICC 0.77 against +/-0.25 s boundary jitter, and it
-    resolves the novice/trained difference at only 0.56x its own noise).  A rate
-    measured against a recording-wide threshold reaches ICC 0.98 and 4.2x, and
-    RMS angular velocity -- which needs no threshold at all -- reaches 0.98 and
-    4.0x.
+
+def sway_metrics(signals: dict[str, object], fs: float, window: slice, prefix: str) -> dict[str, float]:
+    """Sway, tilt and angular activity of the lumbar segment over one window.
+
+    Acceleration RMS is taken about the window mean: a constant residue of the
+    orientation estimate is not sway.  ``corrective_peak_rate_hz`` is kept as a
+    secondary measure -- it was zero in 15 of 20 windows -- and
+    ``rms_angular_velocity_dps``, which needs no threshold, is the primary one.
     """
-    omega = kin.omega_mag["lumbar"]
-    threshold = corrective_threshold(omega, fs)
-    count, _ = count_corrective_peaks(omega[stab], fs, threshold=threshold)
-    duration_s = max((stab.stop - stab.start) / fs, 1e-9)
+    sway = signals["sway"][window]
+    omega = signals["lumbar_omega"][window]
+    duration_s = max((window.stop - window.start) / fs, 1e-9)
     return {
-        "corrective_peak_rate_hz": count / duration_s,
-        "lumbar_rms_angular_velocity_dps": float(np.sqrt(np.mean(omega[stab] ** 2))),
+        f"{prefix}ml_acc_rms_mps2": _rms_about_mean(sway[:, 0]),
+        f"{prefix}ap_acc_rms_mps2": _rms_about_mean(sway[:, 1]),
+        f"{prefix}frontal_tilt_sd_deg": float(np.std(signals["lumbar_frontal_tilt"][window])),
+        f"{prefix}sagittal_tilt_sd_deg": float(np.std(signals["lumbar_sagittal_tilt"][window])),
+        f"{prefix}rms_angular_velocity_dps": float(np.sqrt(np.mean(omega ** 2))) if len(omega) else float("nan"),
+        f"{prefix}corrective_peak_rate_hz": (
+            count_corrective_peaks(omega, fs, signals["corrective_threshold"]) / duration_s
+        ),
     }
 
 
-def lumbar_body_acceleration(kin: Kinematics, trial: TrialData) -> np.ndarray:
-    """Lumbar acceleration (g) in the body frame: x = forward (AP), y = right (ML), z = down."""
-    lumbar_acc = trial.data["lumbar"][ACC_COLUMNS].to_numpy()[: len(kin.t)]
-    return lumbar_acc @ mounting_matrix("lumbar").T
+def _quiet_z(signals: dict[str, object], start: int, end: int) -> float:
+    return detection.window_quietness(signals["stability"], start, end)[1]
 
 
 # ---------------------------------------------------------------------------
@@ -87,222 +113,196 @@ def lumbar_body_acceleration(kin: Kinematics, trial: TrialData) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def compute_trunk_rotation_balance_metrics(label: str, kin: Kinematics, trial: TrialData, start: int, end: int, stab_start: int, stab_end: int, lag_pad_s: float | None = None) -> dict[str, float | str]:
+def compute_trunk_rotation_balance_metrics(
+    label: str, fs: float, event_id: str, start: int, end: int, stab_start: int, stab_end: int,
+    signals: dict[str, object], lag_pad_s: float | None = None,
+) -> dict[str, float | str]:
     """Balance metrics for one trunk-rotation event.
 
-    ``lag_pad_s`` widens *only* the window used for the trunk-pelvis
-    cross-correlation, by that many seconds on each side.  The lag search spans
-    +/-2 s (``cross_correlation_lag``), so an event shorter than about 4 s
-    cannot support it and the estimate pins to the bound.  Velocity-segmented
-    events are routinely 2-3 s, so they need the padding; the fixed 8 s windows
-    did not, and the default of None reproduces the original behaviour exactly.
-    The same decoupling is used by ``compute_knee_balance_metrics``, which
-    scores its lag over a fixed window around peak flexion.
-    """
-    fs = trial.fs
-    event = slice(start, end)
-    stab = slice(stab_start, stab_end)
+    ``lag_pad_s`` widens *only* the window of the trunk-pelvis lag, by that many
+    seconds on each side: velocity-segmented events are routinely 2-3 s, too
+    short to support the +/-1 s search on their own.
 
+    Smoothness is SPARC of the trunk-on-pelvis turning speed over the event.
+    It replaces the dimensionless jerk of the lumbar Euler x angle -- which was
+    pelvic pitch, not the lateral weight shift it was named for, and dominated
+    by noise.
+    """
+    n = len(signals["chest_rate"])
     if lag_pad_s is None:
-        lag_event = event
+        lag_window = slice(start, end)
     else:
         pad = int(round(lag_pad_s * fs))
-        lag_event = slice(max(0, start - pad), min(len(kin.t), end + pad))
+        lag_window = slice(max(0, start - pad), min(n, end + pad))
+    r, lag = yaw_lag(signals, fs, lag_window)
+    relative_rate = signals["chest_rate"][start:end] - signals["pelvis_rate"][start:end]
+    relative_angle = np.cumsum(relative_rate) / fs
 
-    # Postural sway: AP (x) and ML (y) acceleration variance while stabilizing.
-    body_acc = lumbar_body_acceleration(kin, trial)
-    ap_acc_var = float(np.var(body_acc[stab, 0]))
-    ml_acc_var = float(np.var(body_acc[stab, 1]))
-
-    # Detrend yaw over the full signal before slicing the event window so that
-    # slow drift accumulated before the event does not corrupt the correlation.
-    lumbar_z_detrended = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
-    chest_z_detrended = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
-    corr, lag = cross_correlation_lag(lumbar_z_detrended[lag_event], chest_z_detrended[lag_event], fs)
-    dj = dimensionless_jerk(kin.eulers_deg["lumbar"][event, 0], fs)
-    orientation = kin.eulers_deg["lumbar"][stab, :]
-    orient_var = float(np.sqrt(np.mean(np.var(orientation, axis=0))))
-    peak_count, peak_height = count_corrective_peaks(kin.omega_mag["lumbar"][stab], fs)
     return {
         "trial": label,
+        "event_id": event_id,
         "event_start_s": start / fs,
         "event_end_s": end / fs,
+        "event_duration_s": (end - start) / fs,
         "stabilization_start_s": stab_start / fs,
         "stabilization_end_s": stab_end / fs,
-        "trunk_pelvis_peak_cross_correlation": corr,
+        "trunk_pelvis_yaw_r": r,
         "trunk_pelvis_lag_s": lag,
-        "weight_shift_dimensionless_jerk": dj,
-        "weight_shift_log10_dimensionless_jerk": math.log10(dj) if dj > 0 else float("nan"),
-        "lumbar_orientation_variability_deg": orient_var,
-        "lumbar_ap_acc_variance_g2": ap_acc_var,
-        "lumbar_ml_acc_variance_g2": ml_acc_var,
-        "corrective_lumbar_angular_velocity_peak_count": peak_count,
-        "largest_corrective_lumbar_angular_velocity_dps": peak_height,
-        **corrective_activity(kin, fs, stab),
+        "trunk_yaw_sparc": sparc(relative_rate, fs),
+        "trunk_yaw_excursion_deg": float(np.ptp(relative_angle)) if len(relative_angle) else float("nan"),
+        "trunk_yaw_peak_rate_dps": float(np.max(np.abs(relative_rate))) if len(relative_rate) else float("nan"),
+        **sway_metrics(signals, fs, slice(stab_start, stab_end), "lumbar_"),
+        "stabilization_quiet_z": _quiet_z(signals, stab_start, stab_end),
     }
 
 
 # ---------------------------------------------------------------------------
-# Monopodal stance
+# Single-leg stance
 # ---------------------------------------------------------------------------
 
 
-def summarize_knee_flexion_event(
-    label: str,
-    kin: Kinematics,
-    fs: float,
-    side: str,
-    start: int,
-    end: int,
-    threshold_deg: float = 60.0,
+def _leg_flexion(kin: Kinematics, joint: str, leg: str, fs: float) -> np.ndarray:
+    angles = getattr(kin, f"{leg.lower()}_{joint}_deg")[:, 0]
+    return np.abs(lowpass_signal(angles, fs, cutoff_hz=6.0))
+
+
+def summarize_single_leg_event(
+    label: str, kin: Kinematics, fs: float, event_id: str, lifted_leg: str, start: int, end: int,
+    lift: np.ndarray,
 ) -> dict[str, float | str]:
-    knee_signal = kin.left_knee_deg[:, 0] if side.lower().startswith("l") else kin.right_knee_deg[:, 0]
-    knee_filtered = lowpass_signal(knee_signal, fs, cutoff_hz=6.0)
-    knee_abs = np.abs(knee_filtered)
-
-    event = slice(start, end)
-    peak_rel = int(np.argmax(knee_abs[event]))
-    peak_idx = start + peak_rel
-
-    trunk_rel = np.column_stack(
-        [
-            lowpass_signal(kin.trunk_rel_euler_deg[:, i], fs, cutoff_hz=4.0)[event]
-            for i in range(3)
-        ]
-    )
-    lumbar = np.column_stack(
-        [
-            lowpass_signal(kin.eulers_deg["lumbar"][:, i], fs, cutoff_hz=4.0)[event]
-            for i in range(3)
-        ]
-    )
-    chest_omega = lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=6.0)[event]
-    lumbar_omega = lowpass_signal(kin.omega_mag["lumbar"], fs, cutoff_hz=6.0)[event]
-
-    trunk_rel_mean = np.nanmean(trunk_rel, axis=0)
-    lumbar_mean = np.nanmean(lumbar, axis=0)
-
+    """Where and how high the foot went, and what the knee did: the event-window row."""
+    peak = detection.peak_lift_index(lift, start, end, lifted_leg)
+    knee = _leg_flexion(kin, "knee", lifted_leg, fs)[start:end]
     return {
         "trial": label,
-        "flexed_leg": side,
-        "stance_leg": "Right" if side.lower().startswith("l") else "Left",
-        "threshold_deg": threshold_deg,
+        "event_id": event_id,
+        "lifted_leg": lifted_leg,
+        "stance_leg": "Right" if lifted_leg == "Left" else "Left",
         "window_start_s": start / fs,
         "window_end_s": end / fs,
-        "window_duration_s": (end - start) / fs,
-        "peak_time_s": peak_idx / fs,
-        "peak_signed_knee_flexion_deg": float(knee_filtered[peak_idx]),
-        "peak_abs_knee_flexion_deg": float(knee_abs[peak_idx]),
-        "knee_flexion_range_deg": float(np.ptp(knee_abs[event])),
-        "trunk_rel_x_mean_deg": float(trunk_rel_mean[0]),
-        "trunk_rel_y_mean_deg": float(trunk_rel_mean[1]),
-        "trunk_rel_z_mean_deg": float(trunk_rel_mean[2]),
-        "trunk_rel_x_range_deg": float(np.ptp(trunk_rel[:, 0])),
-        "trunk_rel_y_range_deg": float(np.ptp(trunk_rel[:, 1])),
-        "trunk_rel_z_range_deg": float(np.ptp(trunk_rel[:, 2])),
-        "lumbar_x_mean_deg": float(lumbar_mean[0]),
-        "lumbar_y_mean_deg": float(lumbar_mean[1]),
-        "lumbar_z_mean_deg": float(lumbar_mean[2]),
-        "lumbar_x_range_deg": float(np.ptp(lumbar[:, 0])),
-        "lumbar_y_range_deg": float(np.ptp(lumbar[:, 1])),
-        "lumbar_z_range_deg": float(np.ptp(lumbar[:, 2])),
-        "peak_lumbar_angular_velocity_dps": float(np.max(lumbar_omega)),
-        "peak_chest_angular_velocity_dps": float(np.max(chest_omega)),
-        "peak_trunk_rel_x_deg": float(trunk_rel[peak_rel, 0]),
-        "peak_trunk_rel_y_deg": float(trunk_rel[peak_rel, 1]),
-        "peak_trunk_rel_z_deg": float(trunk_rel[peak_rel, 2]),
+        "peak_time_s": peak / fs,
+        "peak_lift_index": float(abs(lift[peak])),
+        "peak_knee_flexion_deg": float(np.max(knee)) if len(knee) else float("nan"),
     }
 
 
-def compute_knee_balance_metrics(
-    label: str,
-    kin: Kinematics,
-    trial: TrialData,
-    side: str,
-    start: int,
-    end: int,
-    lag_pre_s: float = 1.0,
-    lag_post_s: float = 2.0,
-    stab_start: int | None = None,
-    stab_end: int | None = None,
+def compute_single_leg_metrics(
+    label: str, kin: Kinematics, fs: float, event_id: str, lifted_leg: str,
+    start: int, end: int, stab_start: int, stab_end: int, signals: dict[str, object],
+    lag_window_s: tuple[float, float] = (2.0, 3.0),
 ) -> dict[str, float | str]:
-    fs = trial.fs
-    knee_signal = kin.left_knee_deg[:, 0] if side.lower().startswith("l") else kin.right_knee_deg[:, 0]
-    knee_abs = np.abs(lowpass_signal(knee_signal, fs, cutoff_hz=6.0))
-    peak_idx = start + int(np.argmax(knee_abs[start:end]))
+    """Balance metrics for one single-leg stance.
 
-    # Cross-correlation over a fixed window centred on peak knee flexion so
-    # that the window length is consistent across events and participants,
-    # and directly targets the coordination response at maximum challenge.
-    lag_start = max(0, peak_idx - int(lag_pre_s * fs))
-    lag_end = min(len(knee_abs), peak_idx + int(lag_post_s * fs))
-    # A caller that has curated the stabilization window (the event editor)
-    # passes it in; otherwise fall back to the v1 search, as before.
-    if stab_start is None or stab_end is None:
-        stab_start, stab_end = find_stabilization_v1(kin, fs, peak_idx)
-    corr, lag = cross_correlation_lag(
-        highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs)[lag_start:lag_end],
-        highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs)[lag_start:lag_end],
-        fs,
-    )
+    The event window is the support phase, lift-off to touch-down, and is
+    where the base of support is one foot: its sway, tilt and angular activity
+    are the single-leg balance measures (``support_*``).  The stabilization
+    window after touch-down gives the same measures for settling (``settle_*``),
+    and ``time_to_stabilization_s`` is counted from touch-down.
 
-    corr_pitch, lag_pitch = cross_correlation_lag(
-        highpass_detrend(kin.eulers_deg["lumbar"][:, 1], fs)[lag_start:lag_end],
-        highpass_detrend(kin.eulers_deg["chestbone"][:, 1], fs)[lag_start:lag_end],
-        fs,
-    )
+    The knee is described rather than thresholded: ``knee_extension_while_lifted_deg``
+    is how far it straightened after its deepest flexion while the foot was
+    still at least half as high as it got -- large for a kick, small for a knee
+    lift, whose knee only straightens as the foot comes down.
+    The two lags are reported with their correlation, over ``lag_window_s``
+    around the highest lift.  Neither is reliable on these windows -- the
+    trunk barely turns during a stance, and before the lag estimator was fixed
+    they picked anti-phase peaks -- so they are kept out of the figures.
+    """
+    lift = signals["lift"]
+    peak = detection.peak_lift_index(lift, start, end, lifted_leg)
+    knee = _leg_flexion(kin, "knee", lifted_leg, fs)[start:end]
+    hip = _leg_flexion(kin, "hip", lifted_leg, fs)[start:end]
+    deepest = int(np.argmax(knee)) if len(knee) else 0
+    still_up = (np.abs(lift[start:end]) >= 0.5 * abs(lift[peak])) & (np.arange(len(knee)) >= deepest)
 
-    orientation = kin.eulers_deg["lumbar"][stab_start:stab_end,:]
-    orient_var = float(np.sqrt(np.mean(np.var(orientation, axis=0))))
-
-    body_acc = lumbar_body_acceleration(kin, trial)
-    ap_acc_var = float(np.var(body_acc[stab_start:stab_end, 0]))
-    ml_acc_var = float(np.var(body_acc[stab_start:stab_end, 1]))
-    peak_count, peak_height = count_corrective_peaks(
-        kin.omega_mag["lumbar"][stab_start:stab_end], fs
-    )
-
-    trunk_y = lowpass_signal(kin.eulers_deg["lumbar"][:,1], fs, cutoff_hz=4.0)
+    n = len(lift)
+    lag_window = slice(max(0, peak - int(round(lag_window_s[0] * fs))),
+                       min(n, peak + int(round(lag_window_s[1] * fs))))
+    yaw_r, yaw_lag_s = yaw_lag(signals, fs, lag_window)
+    frontal_r, frontal_lag = pearson_lag(signals["lumbar_frontal_tilt"][lag_window],
+                                         signals["chest_frontal_tilt"][lag_window], fs)
 
     return {
         "trial": label,
-        "flexed_leg": side,
-        "stance_leg": "Right" if side.lower().startswith("l") else "Left",
-        "peak_knee_flexion_deg": float(knee_abs[peak_idx]),
-        "peak_trunk_y_deg": float(trunk_y[peak_idx]),
-        "time_to_stabilization_s": float((stab_start - peak_idx) / fs),
-        "lumbar_orientation_variability_deg": orient_var,
-        "lumbar_ap_acc_variance_g2": ap_acc_var,
-        "lumbar_ml_acc_variance_g2": ml_acc_var,
-        "corrective_peak_count": peak_count,
-        "largest_corrective_peak_dps": peak_height,
-        "trunk_pelvis_lag_s": lag,
-        "trunk_pelvis_pitch_lag_s": lag_pitch,
-        **corrective_activity(kin, fs, slice(stab_start, stab_end)),
+        "event_id": event_id,
+        "lifted_leg": lifted_leg,
+        "stance_leg": "Right" if lifted_leg == "Left" else "Left",
+        "support_duration_s": (end - start) / fs,
+        "peak_lift_index": float(abs(lift[peak])),
+        "peak_knee_flexion_deg": float(knee[deepest]) if len(knee) else float("nan"),
+        "knee_extension_while_lifted_deg": (
+            float(knee[deepest] - np.min(knee[still_up])) if still_up.any() else 0.0
+        ),
+        "peak_hip_flexion_deg": float(np.max(hip)) if len(hip) else float("nan"),
+        "lumbar_frontal_tilt_at_peak_deg": float(signals["lumbar_frontal_tilt"][peak]),
+        **sway_metrics(signals, fs, slice(start, end), "support_"),
+        **sway_metrics(signals, fs, slice(stab_start, stab_end), "settle_"),
+        "time_to_stabilization_s": (stab_start - end) / fs,
+        "stabilization_quiet_z": _quiet_z(signals, stab_start, stab_end),
+        "trunk_pelvis_yaw_r": yaw_r,
+        "trunk_pelvis_lag_s": yaw_lag_s,
+        "trunk_pelvis_frontal_r": frontal_r,
+        "trunk_pelvis_frontal_lag_s": frontal_lag,
     }
 
 
-def compute_asymmetry_metrics(knee_metrics: pd.DataFrame) -> pd.DataFrame:
-    """Absolute left-vs-right differences per trial, averaged over events.
+ASYMMETRY_METRICS = (
+    "support_duration_s",
+    "peak_lift_index",
+    "peak_knee_flexion_deg",
+    "support_ml_acc_rms_mps2",
+    "support_frontal_tilt_sd_deg",
+    "support_rms_angular_velocity_dps",
+    "time_to_stabilization_s",
+)
 
-    Returns an empty frame when a trial does not have both stance legs
-    represented, which is the same behaviour as the inline version this was
-    extracted from.
+
+def mirrored_pairs(events: list[dict]) -> list[tuple[dict, dict]]:
+    """Left and right versions of the same movement, as ``(left, right)``.
+
+    Events carrying the same ``movement`` label pair with each other; the rest
+    pair the k-th left lift with the k-th right lift in time order -- on these
+    recordings a knee lift on each side, then a lift-and-kick on each side.
     """
-    if len(knee_metrics) == 0:
-        return pd.DataFrame()
+    pairs: list[tuple[dict, dict]] = []
+    labelled = [e for e in events if e.get("movement")]
+    for name in dict.fromkeys(e["movement"] for e in labelled):
+        sides = {e["lifted_leg"]: e for e in labelled if e["movement"] == name}
+        if "Left" in sides and "Right" in sides:
+            pairs.append((sides["Left"], sides["Right"]))
+    rest = [e for e in events if not e.get("movement")]
+    lefts = [e for e in rest if e["lifted_leg"] == "Left"]
+    rights = [e for e in rest if e["lifted_leg"] == "Right"]
+    pairs += list(zip(lefts, rights))
+    return pairs
 
-    agg = knee_metrics.groupby(["trial", "stance_leg"]).mean(numeric_only=True).reset_index()
-    asym_rows = []
-    for tr in ["Novice", "Trained"]:
-        tr_data = agg[agg.trial == tr]
-        if len(tr_data) == 2:
-            left = tr_data[tr_data.stance_leg == "Left"].iloc[0]
-            right = tr_data[tr_data.stance_leg == "Right"].iloc[0]
-            asym_rows.append({
-                "trial": tr,
-                "peak_knee_flexion_diff_deg": abs(left["peak_knee_flexion_deg"] - right["peak_knee_flexion_deg"]),
-                "time_to_stabilization_diff_s": abs(left["time_to_stabilization_s"] - right["time_to_stabilization_s"]),
-                "lumbar_ml_acc_variance_diff_g2": abs(left["lumbar_ml_acc_variance_g2"] - right["lumbar_ml_acc_variance_g2"]),
-            })
-    return pd.DataFrame(asym_rows)
+
+def compute_asymmetry_metrics(single_leg: pd.DataFrame, events: list[dict]) -> pd.DataFrame:
+    """Left-minus-right differences between mirrored stances, per recording.
+
+    One row per mirrored pair with the signed difference of each metric, and a
+    ``mean |L-R|`` row per recording.  Pooling every left and every right event
+    instead -- as before -- compared a knee lift with a kick, and put the right
+    kick on the left side because it had been labelled with the wrong leg.
+    """
+    if len(single_leg) == 0:
+        return pd.DataFrame()
+    rows = []
+    for label, group in single_leg.groupby("trial", sort=False):
+        by_id = {row["event_id"]: row for _, row in group.iterrows()}
+        present = [e for e in events if e["event_id"] in by_id]
+        pair_rows = []
+        for index, (left, right) in enumerate(mirrored_pairs(present), 1):
+            a, b = by_id[left["event_id"]], by_id[right["event_id"]]
+            row = {"trial": label, "pair": str(index), "left_event_id": left["event_id"],
+                   "right_event_id": right["event_id"],
+                   "movement": left.get("movement") or right.get("movement") or ""}
+            row.update({f"{m}_l_minus_r": float(a[m] - b[m]) for m in ASYMMETRY_METRICS})
+            pair_rows.append(row)
+        if pair_rows:
+            summary = {"trial": label, "pair": "mean |L-R|", "left_event_id": "", "right_event_id": "",
+                       "movement": ""}
+            summary.update({f"{m}_l_minus_r": float(np.mean([abs(r[f"{m}_l_minus_r"]) for r in pair_rows]))
+                            for m in ASYMMETRY_METRICS})
+            rows += pair_rows + [summary]
+    return pd.DataFrame(rows)

@@ -1,0 +1,3 @@
+trial,recording,metrics_version,n_turns,total_turn_s,turn_duration_s_median,chest_yaw_excursion_deg_median,chest_yaw_peak_rate_dps_median,chest_yaw_sparc_median,chest_yaw_submovement_rate_hz_median,chest_pelvis_lag_s_median,chest_pelvis_gain_median,relative_yaw_range_deg_median
+Novice,IMU_Trial_1_RC_Novice.csv,2,28,158.738387300929,4.542749636580028,86.86244757245285,36.75060628779163,-1.934774760087957,0.8657648239148239,-0.28954154489862016,0.5668367469884116,42.345315651170395
+Trained,IMU_Trial_3_RC_Trained.csv,2,28,156.861887451049,4.383449649324028,80.9065662696837,40.50275966879178,-1.7907318675035155,0.801897707722958,-0.24848232629140377,0.5513579800236916,40.72237810314182
