@@ -150,7 +150,25 @@ class Recording:
         absent = [path.name for path in self.outputs() if not path.exists()]
         if absent:
             return "stale", f"missing {', '.join(absent)}"
+        if self.export_stale():
+            return "stale", (f"the 50 Hz export is format {manifest.get('export_version', 1)}, the current one "
+                             f"is {config.EXPORT_VERSION} (rebuilt from the orientation cache, no filtering)")
         return "done", f"processed {manifest.get('processed_local', '')}".strip()
+
+    def orientation_current(self) -> bool:
+        """Whether the orientation cache itself is up to date, whatever the export."""
+        manifest = self.manifest()
+        if not self.orientation_path.exists() or manifest is None:
+            return False
+        source = manifest.get("source", {})
+        return source.get("size") == self.size and (
+            source.get("mtime_ns") == self.mtime_ns or source.get("sha256") == self.sha256()
+        )
+
+    def export_stale(self) -> bool:
+        """The 50 Hz export was written in an older format than ``config.EXPORT_VERSION``."""
+        manifest = self.manifest() or {}
+        return int(manifest.get("export_version", 1)) < config.EXPORT_VERSION
 
     def identity(self) -> dict:
         """How this recording is named in session, analysis and provenance files."""

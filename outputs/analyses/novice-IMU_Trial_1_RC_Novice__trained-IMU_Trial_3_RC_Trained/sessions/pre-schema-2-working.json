@@ -1,7 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "created_utc": "2026-09-21T21:24:51+00:00",
-  "modified_utc": "2026-09-26T02:03:15+00:00",
+  "modified_utc": "2026-09-24T00:10:41+00:00",
   "fs": {
     "Novice": 370.3704,
     "Trained": 370.3704
@@ -27,21 +27,17 @@
     "knee_merge_gap_s": 0.2,
     "stab_min_duration_s": 3,
     "stab_horizon_s": 10,
+    "stab_latency_weight": 0.35,
     "stab_baseline_percentile": 20,
+    "stab_low_confidence_ratio": 1.6,
     "stab_omega_cutoff_hz": 4,
+    "smooth_half_cycles": false,
     "smooth_yaw_cutoff_hz": 0.5,
     "smooth_min_lobe_deg": 10,
     "smooth_min_lobe_separation_s": 1.5,
     "smooth_min_excursion_deg": 10,
     "smooth_min_duration_s": 2,
-    "smooth_max_duration_s": 20,
-    "knee_method": "lift",
-    "knee_lift_min_peak": 0.25,
-    "knee_lift_rel_threshold": 0.15,
-    "knee_lift_min_duration_s": 0.5,
-    "stab_latency_weight": 0.65,
-    "stab_scale_percentile": 50.0,
-    "stab_low_confidence_z": 1.0
+    "smooth_max_duration_s": 20
   },
   "lag_pad_s": 2,
   "knee_lag_window_s": [
@@ -66,24 +62,22 @@
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 5.428,
-          "stab_quiet_z": 3.15
+          "stab_quiet_ratio": 1.91
         },
         "Trained": {
-          "event_start": 23286,
-          "event_end": 25654,
-          "stab_start": 25965,
-          "stab_end": 27076,
-          "event_start_s": 62.8722,
-          "event_end_s": 69.2658,
-          "stab_start_s": 70.1055,
-          "stab_end_s": 73.1052,
+          "event_start": 14098,
+          "event_end": 16064,
+          "stab_start": 16064,
+          "stab_end": 17175,
+          "event_start_s": 38.0646,
+          "event_end_s": 43.3728,
+          "stab_start_s": 43.3728,
+          "stab_end_s": 46.3725,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 4.386,
-          "stab_quiet_z": 2.282
+          "stab_quiet_ratio": 2.017
         }
       }
     },
@@ -104,24 +98,22 @@
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 4.525,
-          "stab_quiet_z": 2.508
+          "stab_quiet_ratio": 1.567
         },
         "Trained": {
-          "event_start": 31341,
-          "event_end": 33059,
-          "stab_start": 33629,
-          "stab_end": 34740,
-          "event_start_s": 84.6207,
-          "event_end_s": 89.2593,
-          "stab_start_s": 90.7983,
-          "stab_end_s": 93.798,
+          "event_start": 23302,
+          "event_end": 25647,
+          "stab_start": 25940,
+          "stab_end": 27051,
+          "event_start_s": 62.9154,
+          "event_end_s": 69.2469,
+          "stab_start_s": 70.038,
+          "stab_end_s": 73.0377,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 4.129,
-          "stab_quiet_z": 2.109
+          "stab_quiet_ratio": 2.108
         }
       }
     },
@@ -132,18 +124,53 @@
         "Novice": {
           "event_start": 34324,
           "event_end": 35934,
-          "stab_start": 36599,
-          "stab_end": 37710,
+          "stab_start": 37011,
+          "stab_end": 38122,
           "event_start_s": 92.6748,
           "event_end_s": 97.0218,
-          "stab_start_s": 98.8173,
-          "stab_end_s": 101.817,
+          "stab_start_s": 99.9297,
+          "stab_end_s": 102.9294,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 3.719,
-          "stab_quiet_z": 1.935
+          "stab_quiet_ratio": 1.346
+        },
+        "Trained": {
+          "event_start": 31341,
+          "event_end": 33059,
+          "stab_start": 33577,
+          "stab_end": 34688,
+          "event_start_s": 84.6207,
+          "event_end_s": 89.2593,
+          "stab_start_s": 90.6579,
+          "stab_end_s": 93.6576,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.366
+        }
+      }
+    },
+    {
+      "event_id": "trunk-04",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 36143,
+          "event_end": 37110,
+          "stab_start": 37110,
+          "stab_end": 38221,
+          "event_start_s": 97.5861,
+          "event_end_s": 100.197,
+          "stab_start_s": 100.197,
+          "stab_end_s": 103.1967,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.294
         },
         "Trained": {
           "event_start": 33150,
@@ -158,46 +185,7 @@
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 5.011,
-          "stab_quiet_z": 2.704
-        }
-      }
-    },
-    {
-      "event_id": "trunk-04",
-      "enabled": true,
-      "windows": {
-        "Novice": {
-          "event_start": 43862,
-          "event_end": 45314,
-          "stab_start": 45314,
-          "stab_end": 46425,
-          "event_start_s": 118.4274,
-          "event_end_s": 122.3478,
-          "stab_start_s": 122.3478,
-          "stab_end_s": 125.3475,
-          "source": {
-            "event": "auto",
-            "stab": "auto"
-          },
-          "stab_quiet_ratio": 3.837,
-          "stab_quiet_z": 2.019
-        },
-        "Trained": {
-          "event_start": 42421,
-          "event_end": 43847,
-          "stab_start": 43847,
-          "stab_end": 44958,
-          "event_start_s": 114.5367,
-          "event_end_s": 118.3869,
-          "stab_start_s": 118.3869,
-          "stab_end_s": 121.3866,
-          "source": {
-            "event": "auto",
-            "stab": "auto"
-          },
-          "stab_quiet_ratio": 4.669,
-          "stab_quiet_z": 2.473
+          "stab_quiet_ratio": 2.279
         }
       }
     },
@@ -206,36 +194,34 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 63303,
-          "event_end": 64127,
-          "stab_start": 64931,
-          "stab_end": 66042,
-          "event_start_s": 170.9181,
-          "event_end_s": 173.1429,
-          "stab_start_s": 175.3137,
-          "stab_end_s": 178.3134,
+          "event_start": 40472,
+          "event_end": 41918,
+          "stab_start": 41918,
+          "stab_end": 43029,
+          "event_start_s": 109.2744,
+          "event_end_s": 113.1786,
+          "stab_start_s": 113.1786,
+          "stab_end_s": 116.1783,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 2.38,
-          "stab_quiet_z": 0.982
+          "stab_quiet_ratio": 2.034
         },
         "Trained": {
-          "event_start": 61976,
-          "event_end": 63330,
-          "stab_start": 63741,
-          "stab_end": 64852,
-          "event_start_s": 167.3352,
-          "event_end_s": 170.991,
-          "stab_start_s": 172.1007,
-          "stab_end_s": 175.1004,
+          "event_start": 66976,
+          "event_end": 68823,
+          "stab_start": 68823,
+          "stab_end": 69934,
+          "event_start_s": 180.8352,
+          "event_end_s": 185.8221,
+          "stab_start_s": 185.8221,
+          "stab_end_s": 188.8218,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 2.28,
-          "stab_quiet_z": 0.863
+          "stab_quiet_ratio": 2.266
         }
       }
     },
@@ -244,36 +230,34 @@
       "enabled": true,
       "windows": {
         "Novice": {
-          "event_start": 72428,
-          "event_end": 73630,
-          "stab_start": 74429,
-          "stab_end": 75540,
-          "event_start_s": 195.5556,
-          "event_end_s": 198.801,
-          "stab_start_s": 200.9583,
-          "stab_end_s": 203.958,
+          "event_start": 63303,
+          "event_end": 64127,
+          "stab_start": 64844,
+          "stab_end": 65955,
+          "event_start_s": 170.9181,
+          "event_end_s": 173.1429,
+          "stab_start_s": 175.0788,
+          "stab_end_s": 178.0785,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 2.208,
-          "stab_quiet_z": 0.86
+          "stab_quiet_ratio": 1.001
         },
         "Trained": {
           "event_start": 70964,
           "event_end": 72372,
-          "stab_start": 73118,
-          "stab_end": 74229,
+          "stab_start": 73135,
+          "stab_end": 74246,
           "event_start_s": 191.6028,
           "event_end_s": 195.4044,
-          "stab_start_s": 197.4186,
-          "stab_end_s": 200.4183,
+          "stab_start_s": 197.4645,
+          "stab_end_s": 200.4642,
           "source": {
             "event": "auto",
             "stab": "auto"
           },
-          "stab_quiet_ratio": 2.422,
-          "stab_quiet_z": 0.959
+          "stab_quiet_ratio": 1.443
         }
       }
     }
@@ -281,6 +265,7 @@
   "knee_events": [
     {
       "event_id": "knee-02",
+      "flexed_leg": "Left",
       "stance_leg": "Right",
       "enabled": true,
       "windows": {
@@ -297,8 +282,7 @@
             "event": "manual",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.245,
-          "stab_quiet_z": 0.174
+          "stab_quiet_ratio": 1.322
         },
         "Trained": {
           "event_start": 45580,
@@ -313,14 +297,13 @@
             "event": "auto",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.439,
-          "stab_quiet_z": 0.296
+          "stab_quiet_ratio": 1.072
         }
-      },
-      "lifted_leg": "Left"
+      }
     },
     {
       "event_id": "knee-03",
+      "flexed_leg": "Right",
       "stance_leg": "Left",
       "enabled": true,
       "windows": {
@@ -337,8 +320,7 @@
             "event": "auto",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.702,
-          "stab_quiet_z": 0.499
+          "stab_quiet_ratio": 1.146
         },
         "Trained": {
           "event_start": 48625,
@@ -353,14 +335,13 @@
             "event": "auto",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.974,
-          "stab_quiet_z": 0.657
+          "stab_quiet_ratio": 1.038
         }
-      },
-      "lifted_leg": "Right"
+      }
     },
     {
       "event_id": "knee-04",
+      "flexed_leg": "Left",
       "stance_leg": "Right",
       "enabled": true,
       "windows": {
@@ -377,8 +358,7 @@
             "event": "manual",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 2.13,
-          "stab_quiet_z": 0.804
+          "stab_quiet_ratio": 1.463
         },
         "Trained": {
           "event_start": 51383,
@@ -393,15 +373,14 @@
             "event": "manual",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.835,
-          "stab_quiet_z": 0.563
+          "stab_quiet_ratio": 1.509
         }
-      },
-      "lifted_leg": "Left"
+      }
     },
     {
       "event_id": "knee-05",
-      "stance_leg": "Left",
+      "flexed_leg": "Left",
+      "stance_leg": "Right",
       "enabled": true,
       "windows": {
         "Novice": {
@@ -417,8 +396,7 @@
             "event": "manual",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 1.541,
-          "stab_quiet_z": 0.385
+          "stab_quiet_ratio": 1.106
         },
         "Trained": {
           "event_start": 55410,
@@ -433,11 +411,9 @@
             "event": "manual",
             "stab": "manual"
           },
-          "stab_quiet_ratio": 3.707,
-          "stab_quiet_z": 1.825
+          "stab_quiet_ratio": 1.043
         }
-      },
-      "lifted_leg": "Right"
+      }
     }
   ],
   "trash": [
@@ -446,6 +422,7 @@
       "deleted_utc": "2026-09-21T22:45:58+00:00",
       "event": {
         "event_id": "knee-05",
+        "flexed_leg": "Right",
         "stance_leg": "Left",
         "enabled": true,
         "windows": {
@@ -464,8 +441,7 @@
             },
             "stab_quiet_ratio": 1.39
           }
-        },
-        "lifted_leg": "Right"
+        }
       }
     },
     {
@@ -473,6 +449,7 @@
       "deleted_utc": "2026-09-21T22:46:04+00:00",
       "event": {
         "event_id": "knee-11",
+        "flexed_leg": "Right",
         "stance_leg": "Left",
         "enabled": true,
         "windows": {
@@ -491,8 +468,7 @@
             },
             "stab_quiet_ratio": 1.13
           }
-        },
-        "lifted_leg": "Right"
+        }
       }
     },
     {
@@ -500,6 +476,7 @@
       "deleted_utc": "2026-09-21T22:46:56+00:00",
       "event": {
         "event_id": "knee-10",
+        "flexed_leg": "Right",
         "stance_leg": "Left",
         "enabled": true,
         "windows": {
@@ -518,8 +495,7 @@
             },
             "stab_quiet_ratio": 1.307
           }
-        },
-        "lifted_leg": "Right"
+        }
       }
     },
     {
@@ -767,6 +743,7 @@
       "deleted_utc": "2026-09-21T23:30:09+00:00",
       "event": {
         "event_id": "knee-01",
+        "flexed_leg": "Left",
         "stance_leg": "Right",
         "enabled": true,
         "windows": {
@@ -798,8 +775,7 @@
               "stab": "manual"
             }
           }
-        },
-        "lifted_leg": "Left"
+        }
       }
     }
   ],
@@ -807,22 +783,21 @@
     {
       "event_id": "smooth-01",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 9753,
-          "event_end": 11916,
-          "event_start_s": 26.3331,
-          "event_end_s": 32.1732,
+          "event_start": 10345,
+          "event_end": 16110,
+          "event_start_s": 27.9315,
+          "event_end_s": 43.497,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 8492,
-          "event_end": 10848,
-          "event_start_s": 22.9284,
-          "event_end_s": 29.2896,
+          "event_start": 12128,
+          "event_end": 18005,
+          "event_start_s": 32.7456,
+          "event_end_s": 48.6135,
           "source": {
             "event": "auto"
           }
@@ -832,22 +807,21 @@
     {
       "event_id": "smooth-02",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 11916,
-          "event_end": 15108,
-          "event_start_s": 32.1732,
-          "event_end_s": 40.7916,
+          "event_start": 16110,
+          "event_end": 21745,
+          "event_start_s": 43.497,
+          "event_end_s": 58.7115,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 10848,
-          "event_end": 13824,
-          "event_start_s": 29.2896,
-          "event_end_s": 37.3248,
+          "event_start": 18005,
+          "event_end": 24029,
+          "event_start_s": 48.6135,
+          "event_end_s": 64.8783,
           "source": {
             "event": "auto"
           }
@@ -857,22 +831,21 @@
     {
       "event_id": "smooth-03",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 15108,
-          "event_end": 17412,
-          "event_start_s": 40.7916,
-          "event_end_s": 47.0124,
+          "event_start": 21745,
+          "event_end": 26475,
+          "event_start_s": 58.7115,
+          "event_end_s": 71.4825,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 13824,
-          "event_end": 16153,
-          "event_start_s": 37.3248,
-          "event_end_s": 43.6131,
+          "event_start": 24029,
+          "event_end": 26215,
+          "event_start_s": 64.8783,
+          "event_end_s": 70.7805,
           "source": {
             "event": "auto"
           }
@@ -882,22 +855,21 @@
     {
       "event_id": "smooth-04",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 17412,
-          "event_end": 20362,
-          "event_start_s": 47.0124,
-          "event_end_s": 54.9774,
+          "event_start": 26475,
+          "event_end": 29551,
+          "event_start_s": 71.4825,
+          "event_end_s": 79.7877,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 16153,
-          "event_end": 19183,
-          "event_start_s": 43.6131,
-          "event_end_s": 51.7941,
+          "event_start": 26215,
+          "event_end": 31877,
+          "event_start_s": 70.7805,
+          "event_end_s": 86.0679,
           "source": {
             "event": "auto"
           }
@@ -907,22 +879,21 @@
     {
       "event_id": "smooth-05",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 20362,
-          "event_end": 24536,
-          "event_start_s": 54.9774,
-          "event_end_s": 66.2472,
+          "event_start": 29551,
+          "event_end": 35218,
+          "event_start_s": 79.7877,
+          "event_end_s": 95.0886,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 19183,
-          "event_end": 23171,
-          "event_start_s": 51.7941,
-          "event_end_s": 62.5617,
+          "event_start": 31877,
+          "event_end": 35430,
+          "event_start_s": 86.0679,
+          "event_end_s": 95.661,
           "source": {
             "event": "auto"
           }
@@ -932,22 +903,21 @@
     {
       "event_id": "smooth-06",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 24536,
-          "event_end": 25896,
-          "event_start_s": 66.2472,
-          "event_end_s": 69.9192,
+          "event_start": 35218,
+          "event_end": 37974,
+          "event_start_s": 95.0886,
+          "event_end_s": 102.5298,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 23171,
-          "event_end": 24612,
-          "event_start_s": 62.5617,
-          "event_end_s": 66.4524,
+          "event_start": 35430,
+          "event_end": 38188,
+          "event_start_s": 95.661,
+          "event_end_s": 103.1076,
           "source": {
             "event": "auto"
           }
@@ -957,22 +927,21 @@
     {
       "event_id": "smooth-07",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 25896,
-          "event_end": 26872,
-          "event_start_s": 69.9192,
-          "event_end_s": 72.5544,
+          "event_start": 37974,
+          "event_end": 41119,
+          "event_start_s": 102.5298,
+          "event_end_s": 111.0213,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 24612,
-          "event_end": 25642,
-          "event_start_s": 66.4524,
-          "event_end_s": 69.2334,
+          "event_start": 38188,
+          "event_end": 41269,
+          "event_start_s": 103.1076,
+          "event_end_s": 111.4263,
           "source": {
             "event": "auto"
           }
@@ -982,22 +951,21 @@
     {
       "event_id": "smooth-08",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 26872,
-          "event_end": 28650,
-          "event_start_s": 72.5544,
-          "event_end_s": 77.355,
+          "event_start": 41119,
+          "event_end": 44375,
+          "event_start_s": 111.0213,
+          "event_end_s": 119.8125,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 25642,
-          "event_end": 27579,
-          "event_start_s": 69.2334,
-          "event_end_s": 74.4633,
+          "event_start": 41269,
+          "event_end": 44570,
+          "event_start_s": 111.4263,
+          "event_end_s": 120.339,
           "source": {
             "event": "auto"
           }
@@ -1007,22 +975,21 @@
     {
       "event_id": "smooth-09",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 28650,
-          "event_end": 32602,
-          "event_start_s": 77.355,
-          "event_end_s": 88.0254,
+          "event_start": 44375,
+          "event_end": 46854,
+          "event_start_s": 119.8125,
+          "event_end_s": 126.5058,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 27579,
-          "event_end": 31205,
-          "event_start_s": 74.4633,
-          "event_end_s": 84.2535,
+          "event_start": 56017,
+          "event_end": 62120,
+          "event_start_s": 151.2459,
+          "event_end_s": 167.724,
           "source": {
             "event": "auto"
           }
@@ -1032,22 +999,21 @@
     {
       "event_id": "smooth-10",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 32602,
-          "event_end": 34251,
-          "event_start_s": 88.0254,
-          "event_end_s": 92.4777,
+          "event_start": 58627,
+          "event_end": 65153,
+          "event_start_s": 158.2929,
+          "event_end_s": 175.9131,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 31205,
-          "event_end": 33045,
-          "event_start_s": 84.2535,
-          "event_end_s": 89.2215,
+          "event_start": 62120,
+          "event_end": 67427,
+          "event_start_s": 167.724,
+          "event_end_s": 182.0529,
           "source": {
             "event": "auto"
           }
@@ -1057,22 +1023,21 @@
     {
       "event_id": "smooth-11",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 34251,
-          "event_end": 35951,
-          "event_start_s": 92.4777,
-          "event_end_s": 97.0677,
+          "event_start": 65153,
+          "event_end": 69843,
+          "event_start_s": 175.9131,
+          "event_end_s": 188.5761,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 33045,
-          "event_end": 34634,
-          "event_start_s": 89.2215,
-          "event_end_s": 93.5118,
+          "event_start": 67427,
+          "event_end": 69664,
+          "event_start_s": 182.0529,
+          "event_end_s": 188.0928,
           "source": {
             "event": "auto"
           }
@@ -1082,22 +1047,21 @@
     {
       "event_id": "smooth-12",
       "enabled": true,
-      "direction": -1,
       "windows": {
         "Novice": {
-          "event_start": 35951,
-          "event_end": 37288,
-          "event_start_s": 97.0677,
-          "event_end_s": 100.6776,
+          "event_start": 69843,
+          "event_end": 72838,
+          "event_start_s": 188.5761,
+          "event_end_s": 196.6626,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 34634,
-          "event_end": 36152,
-          "event_start_s": 93.5118,
-          "event_end_s": 97.6104,
+          "event_start": 69664,
+          "event_end": 73096,
+          "event_start_s": 188.0928,
+          "event_end_s": 197.3592,
           "source": {
             "event": "auto"
           }
@@ -1107,397 +1071,21 @@
     {
       "event_id": "smooth-13",
       "enabled": true,
-      "direction": 1,
       "windows": {
         "Novice": {
-          "event_start": 37288,
-          "event_end": 38713,
-          "event_start_s": 100.6776,
-          "event_end_s": 104.5251,
+          "event_start": 72838,
+          "event_end": 77529,
+          "event_start_s": 196.6626,
+          "event_end_s": 209.3283,
           "source": {
             "event": "auto"
           }
         },
         "Trained": {
-          "event_start": 36152,
-          "event_end": 37547,
-          "event_start_s": 97.6104,
-          "event_end_s": 101.3769,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-14",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 38713,
-          "event_end": 40378,
-          "event_start_s": 104.5251,
-          "event_end_s": 109.0206,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 37547,
-          "event_end": 38908,
-          "event_start_s": 101.3769,
-          "event_end_s": 105.0516,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-15",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 40378,
-          "event_end": 41835,
-          "event_start_s": 109.0206,
-          "event_end_s": 112.9545,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 38908,
-          "event_end": 40337,
-          "event_start_s": 105.0516,
-          "event_end_s": 108.9099,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-16",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 41835,
-          "event_end": 43280,
-          "event_start_s": 112.9545,
-          "event_end_s": 116.856,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 40337,
-          "event_end": 41995,
-          "event_start_s": 108.9099,
-          "event_end_s": 113.3865,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-17",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 43280,
-          "event_end": 45184,
-          "event_start_s": 116.856,
-          "event_end_s": 121.9968,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 41995,
-          "event_end": 43850,
-          "event_start_s": 113.3865,
-          "event_end_s": 118.395,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-18",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 45184,
-          "event_end": 46300,
-          "event_start_s": 121.9968,
-          "event_end_s": 125.01,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 43850,
-          "event_end": 45046,
-          "event_start_s": 118.395,
-          "event_end_s": 121.6242,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-19",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 55935,
-          "event_end": 57581,
-          "event_start_s": 151.0245,
-          "event_end_s": 155.4687,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 55234,
-          "event_end": 56653,
-          "event_start_s": 149.1318,
-          "event_end_s": 152.9631,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-20",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 57581,
-          "event_end": 62367,
-          "event_start_s": 155.4687,
-          "event_end_s": 168.3909,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 56653,
-          "event_end": 61424,
-          "event_start_s": 152.9631,
-          "event_end_s": 165.8448,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-21",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 62367,
-          "event_end": 64127,
-          "event_start_s": 168.3909,
-          "event_end_s": 173.1429,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 61424,
-          "event_end": 62865,
-          "event_start_s": 165.8448,
-          "event_end_s": 169.7355,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-22",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 64127,
-          "event_end": 68185,
-          "event_start_s": 173.1429,
-          "event_end_s": 184.0995,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 62865,
-          "event_end": 66906,
-          "event_start_s": 169.7355,
-          "event_end_s": 180.6462,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-23",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 68185,
-          "event_end": 69162,
-          "event_start_s": 184.0995,
-          "event_end_s": 186.7374,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 66906,
-          "event_end": 67950,
-          "event_start_s": 180.6462,
-          "event_end_s": 183.465,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-24",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 69162,
-          "event_end": 70303,
-          "event_start_s": 186.7374,
-          "event_end_s": 189.8181,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 67950,
-          "event_end": 68880,
-          "event_start_s": 183.465,
-          "event_end_s": 185.976,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-25",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 70303,
-          "event_end": 72218,
-          "event_start_s": 189.8181,
-          "event_end_s": 194.9886,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 68880,
-          "event_end": 70378,
-          "event_start_s": 185.976,
-          "event_end_s": 190.0206,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-26",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 72218,
-          "event_end": 73665,
-          "event_start_s": 194.9886,
-          "event_end_s": 198.8955,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 70378,
-          "event_end": 72389,
-          "event_start_s": 190.0206,
-          "event_end_s": 195.4503,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-27",
-      "enabled": true,
-      "direction": -1,
-      "windows": {
-        "Novice": {
-          "event_start": 73665,
-          "event_end": 76998,
-          "event_start_s": 198.8955,
-          "event_end_s": 207.8946,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 72389,
-          "event_end": 75578,
-          "event_start_s": 195.4503,
-          "event_end_s": 204.0606,
-          "source": {
-            "event": "auto"
-          }
-        }
-      }
-    },
-    {
-      "event_id": "smooth-28",
-      "enabled": true,
-      "direction": 1,
-      "windows": {
-        "Novice": {
-          "event_start": 76998,
-          "event_end": 78180,
-          "event_start_s": 207.8946,
-          "event_end_s": 211.086,
-          "source": {
-            "event": "auto"
-          }
-        },
-        "Trained": {
-          "event_start": 75578,
-          "event_end": 76777,
-          "event_start_s": 204.0606,
-          "event_end_s": 207.2979,
+          "event_start": 73096,
+          "event_end": 77385,
+          "event_start_s": 197.3592,
+          "event_end_s": 208.9395,
           "source": {
             "event": "auto"
           }
@@ -1518,6 +1106,5 @@
       "size": 157620260,
       "sha256": "cf85d08b0e40886cfc160c4d41c34d2fb7c9e92cfaeeef2931c4c181243fa2d0"
     }
-  },
-  "metrics_version": 2
+  }
 }

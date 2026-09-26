@@ -1,10 +1,11 @@
 """Sanity checks on a session's windows, run before every recalculation.
 
 Errors block recalculation: a window out of order, outside the recording, or
-too short for the metric code to handle.  Warnings are shown in the editor and
-leave the call to the user: a window short enough for the coordination lag to
-saturate, a stabilization window the participant had not settled in, a pair
-that looks mismatched.
+too short for the metric code to handle; a pair whose two windows are not the
+same movement of the form; a stance labelled with the leg that stayed down.
+Warnings are shown in the editor and leave the call to the user: a
+stabilization window the participant had not settled in, a pair whose windows
+cover the same movement but with quite different boundaries.
 """
 
 from __future__ import annotations
@@ -13,16 +14,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from analysis import alignment, detection
 from analysis.config import TRIALS
 from analysis.kinematics import LoadedTrial
 from analysis.sessions import FAMILIES, FAMILY_KEY
+from analysis.signals import LAG_MIN_OVERLAP, LAG_SEARCH_S
 
 
 MIN_EVENT_S = 0.2
 """Hard floor: below ~24 samples (0.065 s) lowpass_signal silently returns the
-signal unfiltered.  Kept permissive because find_knee_flexion_windows accepts
-events from 0.4 s, and the editor must be able to load what the pipeline
-produced."""
+signal unfiltered.  Kept permissive because the editor must be able to load
+whatever a detector produced."""
 
 SHORT_EVENT_WARN_S = 1.0
 """Below this the smoothness metrics are computed over very few cycles."""
@@ -30,10 +32,14 @@ SHORT_EVENT_WARN_S = 1.0
 MIN_STAB_S = 0.5
 """count_corrective_peaks calls find_peaks(distance=int(0.3*fs))."""
 
-LAG_SATURATION_WARN_S = 4.0
-"""cross_correlation_lag searches +/-2 s; a shorter window saturates the lag."""
+LAG_WINDOW_MIN_S = LAG_SEARCH_S / (1.0 - LAG_MIN_OVERLAP)
+"""The shortest lag window in which the +/-1 s search keeps enough overlap at its edges."""
 
-LOW_CONFIDENCE_RATIO = 1.6
+MIN_PAIR_OVERLAP = 0.5
+"""A pair must overlap, once on one clock, by at least this share of its shorter window."""
+
+MIN_PAIR_IOU = 0.5
+"""Below this intersection over union the pair is the same movement cut differently."""
 
 
 @dataclass
@@ -44,10 +50,11 @@ class Issue:
     message: str
 
 
-def validate_window(event_id: str, trial: str, window: dict, fs: float, n_samples: int) -> list[Issue]:
+def validate_window(event_id: str, trial: str, window: dict, fs: float, n_samples: int,
+                    lag_pad_s: float | None = None, low_confidence_z: float = 1.0) -> list[Issue]:
     issues: list[Issue] = []
     start, end = window["event_start"], window["event_end"]
-    # Sequence segments have no stabilization band; everything about one is
+    # Sequence turns have no stabilization band; everything about one is
     # skipped rather than defaulted, so a missing band cannot read as a broken one.
     has_stab = "stab_start" in window and "stab_end" in window
     stab_start, stab_end = window.get("stab_start", 0), window.get("stab_end", 0)
@@ -74,33 +81,35 @@ def validate_window(event_id: str, trial: str, window: dict, fs: float, n_sample
             f"shorter than the {MIN_STAB_S:.1f} s minimum"
         )
 
+    lag_window_s = duration_s + 2.0 * (lag_pad_s or 0.0)
     if end > start and duration_s < SHORT_EVENT_WARN_S:
         warn(f"event is only {duration_s:.2f} s; smoothness metrics span very few cycles")
-    elif end > start and duration_s < LAG_SATURATION_WARN_S:
+    elif end > start and lag_window_s < LAG_WINDOW_MIN_S:
         warn(
-            f"event is {duration_s:.2f} s; the coordination lag searches +/-2 s "
-            "and may saturate on a window this short"
+            f"the coordination-lag window is {lag_window_s:.2f} s; the +/-{LAG_SEARCH_S:.0f} s search "
+            f"needs at least {LAG_WINDOW_MIN_S:.0f} s and may return no lag"
         )
     if has_stab:
-        if stab_start <= end:
+        if stab_start < end:
             warn("stabilization overlaps the event")
-        ratio = window.get("stab_quiet_ratio")
-        if ratio is not None and ratio > LOW_CONFIDENCE_RATIO:
-            warn(f"stabilization is {ratio:.2f}x the quiet baseline - the participant may not have settled")
+        z = window.get("stab_quiet_z")
+        if z is not None and z > low_confidence_z:
+            warn(f"stabilization is busier than the recording's median moment (quiet z {z:.2f}) - "
+                 "the participant may not have settled")
     return issues
 
 
 SEGMENT_OVERLAP_WARN_S = 0.5
-"""Sequence segments tile the form, so neighbours should meet.  A gap or an
-overlap larger than this is usually a boundary dragged past its neighbour."""
+"""Turns tile the form, so neighbours should meet.  A gap or an overlap larger
+than this is usually a boundary dragged past its neighbour."""
 
 
 def check_segment_continuity(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
-    """Flag sequence segments that overlap or leave a hole against their neighbour.
+    """Flag turns that overlap their neighbour.
 
     Unlike the other two families these windows are meant to abut: each ends
-    where the chest passes neutral and the next begins.  A real pause in the
-    form leaves a legitimate gap, so this warns rather than errors.
+    at the turning point where the next begins.  A real pause in the form
+    leaves a legitimate gap, so this warns rather than errors.
     """
     issues: list[Issue] = []
     for label in (label for label in TRIALS if label in trials):
@@ -115,49 +124,95 @@ def check_segment_continuity(events: list[dict], trials: dict[str, LoadedTrial])
             overlap_s = (first["event_end"] - second["event_start"]) / fs
             if overlap_s > SEGMENT_OVERLAP_WARN_S:
                 issues.append(Issue(event_id, label, "warning",
-                                    f"overlaps the previous segment by {overlap_s:.2f} s"))
+                                    f"overlaps the previous turn by {overlap_s:.2f} s"))
     return issues
 
 
-PAIR_OFFSET_TOLERANCE_S = 8.0
-"""How far a pair's novice-to-trained offset may sit from the typical one."""
+def pair_overlap(event: dict, trials: dict[str, LoadedTrial]) -> tuple[float, float] | None:
+    """``(overlap / shorter, IoU)`` of an event's two windows on one clock, or None if unpaired."""
+    windows = event.get("windows", {})
+    aligned = alignment.for_trials(trials)
+    if aligned is None or not all(label in windows for label in TRIALS):
+        return None
+    novice, trained = windows["Novice"], windows["Trained"]
+    fs_n, fs_t = trials["Novice"].fs, trials["Trained"].fs
+    return alignment.mapped_overlap(
+        aligned,
+        (novice["event_start"] / fs_n, novice["event_end"] / fs_n),
+        (trained["event_start"] / fs_t, trained["event_end"] / fs_t),
+    )
 
 
-def check_pairing(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
-    """Flag pairs whose two windows sit at an atypical offset from each other.
+def check_pairing(events: list[dict], trials: dict[str, LoadedTrial], lenient: bool = False) -> list[Issue]:
+    """Flag pairs whose two windows are not the same movement of the form.
 
-    Both participants perform the same form, so across a family the novice and
-    trained windows should be separated by roughly a constant offset -- whatever
-    the difference in when each recording started and how fast each moves.  A
-    pair far from that typical offset is usually a mispairing rather than a real
-    difference, since pairing is by order and one missing event shifts the rest.
-    Comparing against the median offset rather than against zero keeps this
-    robust to the recordings simply not starting together.
+    Each novice window is carried onto the trained clock by the whole-recording
+    alignment.  Overlapping the trained window by less than half of the shorter
+    one means a different movement: an error, unless the event is marked
+    ``pair_confirmed`` (a deliberate exception) or ``lenient`` is set, as for v1
+    sessions whose DTW pairs predate the alignment.  Same movement but an IoU
+    below one half means the two windows are cut quite differently: a warning.
     """
-    offsets = {}
+    issues: list[Issue] = []
+    aligned = alignment.for_trials(trials)
     for event in events:
-        windows = event.get("windows", {})
-        if not all(label in windows and label in trials for label in TRIALS):
+        result = pair_overlap(event, trials)
+        if result is None:
             continue
-        offsets[event["event_id"]] = (
-            windows["Novice"]["event_start"] / trials["Novice"].fs
-            - windows["Trained"]["event_start"] / trials["Trained"].fs
-        )
-    if len(offsets) < 3:
-        return []  # too few pairs for a typical offset to mean anything
+        shared, iou = result
+        novice_start = event["windows"]["Novice"]["event_start"] / trials["Novice"].fs
+        expected = float(aligned.to_trained(novice_start))
+        if shared < MIN_PAIR_OVERLAP:
+            confirmed = bool(event.get("pair_confirmed"))
+            severity = "warning" if (confirmed or lenient) else "error"
+            issues.append(Issue(
+                event["event_id"], "both", severity,
+                f"the two windows are not the same movement: they overlap by {shared:.0%} once aligned "
+                f"(the novice window starts where the trained recording is at {expected:.1f} s)"
+                + (" - pairing confirmed by hand" if confirmed else ""),
+            ))
+        elif iou < MIN_PAIR_IOU:
+            issues.append(Issue(
+                event["event_id"], "both", "warning",
+                f"same movement, but the windows are cut differently (IoU {iou:.2f} once aligned)",
+            ))
+    return issues
 
-    typical = float(np.median(list(offsets.values())))
-    return [
-        Issue(event_id, "both", "warning",
-              f"novice and trained windows are {offset:+.1f} s apart, against a typical "
-              f"{typical:+.1f} s for this set - check they are the same movement")
-        for event_id, offset in offsets.items()
-        if abs(offset - typical) > PAIR_OFFSET_TOLERANCE_S
-    ]
+
+_lift_cache: dict[str, np.ndarray] = {}
+
+
+def lift_index_of(loaded: LoadedTrial) -> np.ndarray:
+    """The recording's lift index, computed once per file: validation runs on every edit."""
+    key = loaded.recording.sha256()
+    if key not in _lift_cache:
+        _lift_cache[key] = detection.lift_signal(loaded.kin, loaded.fs).lift_index
+    return _lift_cache[key]
+
+
+def check_leg_side(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
+    """Flag a stance whose labelled lifted leg is the lower foot in the window."""
+    issues: list[Issue] = []
+    lift = {label: lift_index_of(loaded) for label, loaded in trials.items()}
+    for event in events:
+        leg = event.get("lifted_leg")
+        for label, window in event.get("windows", {}).items():
+            if label not in lift or leg not in ("Left", "Right"):
+                continue
+            mean = float(np.mean(lift[label][window["event_start"]:window["event_end"]]))
+            higher = "Left" if mean > 0 else "Right"
+            if higher != leg:
+                issues.append(Issue(event["event_id"], label, "error",
+                                    f"labelled with the {leg.lower()} leg lifted, but the {higher.lower()} foot "
+                                    f"is the higher one in this window (lift index {mean:+.2f}): swap the leg"))
+    return issues
 
 
 def validate_session(session: dict, trials: dict[str, LoadedTrial]) -> list[Issue]:
     issues: list[Issue] = []
+    detector = session.get("detector") or {}
+    _, stab_params, _, _ = detection.params_from_dict(detector)
+    lenient = str(detector.get("name", "")).startswith("v1")
     for family in FAMILIES:
         enabled = [e for e in session.get(FAMILY_KEY[family], []) if e.get("enabled", True)]
         for event in enabled:
@@ -168,9 +223,12 @@ def validate_session(session: dict, trials: dict[str, LoadedTrial]) -> list[Issu
                     continue
                 loaded = trials[label]
                 issues += validate_window(
-                    event["event_id"], label, window, loaded.fs, loaded.n_samples
+                    event["event_id"], label, window, loaded.fs, loaded.n_samples,
+                    lag_pad_s=session.get("lag_pad_s"), low_confidence_z=stab_params.low_confidence_z,
                 )
-        issues += check_pairing(enabled, trials)
+        issues += check_pairing(enabled, trials, lenient=lenient)
+        if family == "knee":
+            issues += check_leg_side(enabled, trials)
         if family == "smooth":
             issues += check_segment_continuity(enabled, trials)
     return issues

@@ -20,7 +20,7 @@ The dashboard (``python3 app.py``) runs these stages from its Pipeline page.
 They also run headless::
 
     python3 -m analysis.pipeline [--novice FILE] [--trained FILE] [--list]
-                                 [--force-orientation] [--new-session {v2,v1,csv}]
+                                 [--force-orientation] [--new-session {v2,v1}]
 
 Without ``--novice``/``--trained`` the last selection is used.  The saved
 session is reused unless ``--new-session`` is given, so a headless run
@@ -57,7 +57,7 @@ from analysis.data_io import (
     save_orientation_npz,
 )
 from analysis.figures import make_orientation_validation_figure
-from analysis.kinematics import Kinematics, LoadedTrial, compute_kinematics, load_all_trials, sensor_signals
+from analysis.kinematics import Kinematics, LoadedTrial, compute_kinematics, load_all_trials, load_trial, sensor_signals
 from analysis.orientation import madgwick_imu
 from analysis.recompute import RecomputeResult, read_provenance, recompute, session_digest
 from analysis.recordings import Recording, Selection
@@ -123,13 +123,22 @@ def run_orientation_filter(
 
 
 def preprocess(
-    targets: list[Recording], progress: Progress | None = None, workers: int | None = None
+    targets: list[Recording], progress: Progress | None = None, workers: int | None = None,
+    force_orientation: bool = False,
 ) -> None:
     """Stage 1 for each recording in ``targets``: parse, filter, write its output folder.
 
-    The orientation filters of all of them run in one parallel pool.
+    The orientation filters of all of them run in one parallel pool.  A
+    recording whose orientation cache is current and only its 50 Hz export is
+    out of date is re-exported from the cache instead, which takes seconds and
+    leaves ``orientation.npz`` untouched -- unless ``force_orientation``.
     """
     report = progress or _silent
+    if not force_orientation:
+        exports = [recording for recording in targets if recording.orientation_current()]
+        for recording in exports:
+            export_kinematics(recording, report)
+        targets = [recording for recording in targets if recording not in exports]
     parsed = []
     for recording in targets:
         if not recording.path.exists():
@@ -152,6 +161,19 @@ def preprocess(
         _write_recording_manifest(recording, trial, kin)
 
 
+def export_kinematics(recording: Recording, progress: Progress | None = None) -> None:
+    """Rebuild a recording's 50 Hz export from its orientation cache, without filtering again."""
+    report = progress or _silent
+    report(f"Rewriting the 50 Hz export of {recording.name} in format {config.EXPORT_VERSION} "
+           "(the orientation cache is current)")
+    loaded = load_trial(recording, recording.name)
+    save_kinematic_variables(recording.kinematics_path, loaded.kin, loaded.fs)
+    manifest = recording.manifest() or {}
+    manifest["export_version"] = config.EXPORT_VERSION
+    manifest["exported_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    recording.manifest_path.write_text(json.dumps(manifest, indent=2))
+
+
 def _write_recording_manifest(recording: Recording, trial: TrialData, kin: Kinematics) -> None:
     """``recording.json``: which file, byte for byte, the folder was computed from."""
     now = datetime.now(timezone.utc)
@@ -162,6 +184,7 @@ def _write_recording_manifest(recording: Recording, trial: TrialData, kin: Kinem
         "n_samples": len(kin.t),
         "duration_s": round(float(kin.t[-1]), 3),
         "sensors": trial.sensors,
+        "export_version": config.EXPORT_VERSION,
         "processed_utc": now.isoformat(timespec="seconds"),
         "processed_local": now.astimezone().strftime("%d %b %Y %H:%M"),
     }, indent=2))
@@ -185,7 +208,11 @@ def load(progress: Progress | None = None, selection: Selection | None = None) -
     selection = selection or recordings.active()
     report("Loading " + " and ".join(f"the {role.lower()} recording ({name})"
                                      for role, name in selection.names().items()))
-    return load_all_trials(selection)
+    trials = load_all_trials(selection)
+    for label, loaded in trials.items():
+        for warning in loaded.kin.calibration.warnings():
+            report(f"Warning, {label.lower()}: {warning}")
+    return trials
 
 
 def open_session(
@@ -241,7 +268,7 @@ def run(
     targets = ([recording for recording in selection.recordings().values() if recording]
                if force_orientation else pending_preprocessing(selection))
     if targets:
-        preprocess(targets, progress, workers)
+        preprocess(targets, progress, workers, force_orientation=force_orientation)
     trials = load(progress, selection)
     session = open_session(trials, new_session, progress)
     return recalculate(session, trials, progress)
@@ -309,8 +336,8 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
         name = session.get("session_name") or "working session (unnamed)"
         detector = (session.get("detector") or {}).get("name", "v2")
         counts = (f"{len(session.get('trunk_events', []))} trunk rotations · "
-                  f"{len(session.get('knee_events', []))} monopodal stances · "
-                  f"{len(session.get('smooth_events', []))} sequence segments")
+                  f"{len(session.get('knee_events', []))} single-leg stances · "
+                  f"{len(session.get('smooth_events', []))} sequence turns")
         result["session"] = StageStatus("done", f"{name}: {counts} (detector {detector}, "
                                                 f"last edited {_when(sessions.session_path())})")
 
