@@ -20,7 +20,7 @@ Every event of every family is paired with the same movement in the other record
 whole-recording alignment, and the novice–trained comparison is made pair by pair
 (`paired_comparison.csv`).
 
-> **Metrics version 2.** The metric definitions were revised after an external review
+> **Metrics version 2.** The metric definitions were revised after review
 > ([Review.md](Review.md)), with every claim checked on the recordings (see
 > [What changed in version 2](#what-changed-in-version-2)). The numbers of the June write-up
 > (`docs/Tai Chi Balance Analysis.pdf`) are metrics version 1 and are reproduced by the git tag
