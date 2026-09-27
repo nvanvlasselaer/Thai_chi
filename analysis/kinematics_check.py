@@ -187,6 +187,7 @@ def sensor_check(kin: Kinematics, trial: TrialData, dedrifted: dict[str, Rotatio
                               "cannot do: the thigh or shank sensor turned around, or left and right swapped")
         rows.append({
             "sensor": sensor,
+            "recorded_as": trial.recorded_as.get(sensor, sensor),
             "segment": config.SENSOR_MAP.get(sensor, "unmapped"),
             "mounting_tilt_deg": round(tilt, 1),
             "gravity_at_rest_g": round(gravity, 3),

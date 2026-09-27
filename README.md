@@ -57,10 +57,13 @@ chosen. Until you choose, the two recordings of the original study are selected 
 **Format.** Delsys Trigno Discover 2.0.1.3 CSV export: eight metadata rows, then one 12-column block
 per sensor (ACC X/Y/Z and GYRO X/Y/Z, each with its own time column). Sampling rate **370.3704 Hz**
 on every channel; ~240 s per recording. Sensor order differs between the two files, so the parser
-matches by name rather than position.
+matches the sensors by their labels rather than their position.
 
 **Sensors (14).** Sternum (`chestbone`) and lower back (`lumbar`); left/right thigh, tibia and foot;
-left/right humerus, ulna and hand. Placement is documented in [docs/notes.txt](docs/notes.txt).
+left/right humerus, ulna and hand. Placement is documented in [docs/notes.txt](docs/notes.txt). The
+file labels each sensor as it was set up in Trigno Discover, a free text and the sensor's serial
+number (`L_humerus (84483)`). Recordings whose labels are not these names get them on the Pipeline
+page's **Sensor names** card (see [Sensor names](#sensor-names)).
 
 **Important limitation.** The sensors are 6-axis (accelerometer + gyroscope, **no magnetometer**).
 Rotation about the gravity vector — yaw — is therefore not directly observable and is subject to
@@ -117,6 +120,7 @@ the button that re-runs it:
 | stage | what it does | re-run when |
 | --- | --- | --- |
 | Recordings | choose a novice and a trained recording from the CSVs in `data/`, or leave one empty; **Use these recordings** switches to that selection | you want to analyse other recordings |
+| Sensor names | which sensor in each selected recording is which: every label in the file with the analysis name suggested for it, a dropdown to change it, and a stick figure showing which label each body spot has been given. **Save these names** writes them to the recording's `sensor_names.json`. Labels that spell the analysis names, as in the two original recordings, need nothing | a recording's labels are not the analysis names, or a sensor turns out misnamed |
 | 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory, orientation validation figure and sensor check. Done once per recording and reused by every selection it is in. The card says which sensors, if any, need a look, and **Check sensors and kinematics** opens the Kinematics check page | a recording changes (detected from its size and SHA-256) or the orientation code changes |
 | 2 · Recordings loaded | rebuilds the kinematics from the caches (about 5 s) | after stage 1 (automatic) |
 | 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors or the v1 detectors; the session it replaces is kept in its `sessions/_previous.json`. A session from an older schema is migrated when it is opened (the original is kept as `sessions/pre-schema-2-<name>.json`) | you want to start the curation over |
@@ -143,6 +147,34 @@ CSVs and is intended to be committed.
 
 **Recalculating overwrites the output CSVs and figures in place.** The previous values remain
 available through git.
+
+### Sensor names
+
+The analysis knows its 14 sensors by fixed names (`chestbone`, `lumbar`, `lthigh`, … — the keys of
+`config.SENSOR_MAP`), and each name decides how the sensor is assumed to sit on the body, which
+joints it forms and where it is drawn. A recording labels its sensors however they were set up, so
+before stage 1 each label is given one of those names (`analysis/sensor_names.py`):
+
+- **Spelled:** a label that spells a name, ignoring case, spaces, dashes and underscores
+  (`L_humerus (84483)` → `lhumerus`), is used as it is. This is the case for the two original
+  recordings, so they need nothing.
+- **Suggested:** otherwise the card suggests a name, from what the label reads as (`Left Upper Arm`,
+  `R_Shank`, `Sternum`, `Sacrum`) or, for a label that says nothing (`Sensor 3 (84483)`), from the name
+  the same serial number has in another recording. A segment with a side needs the side in the label:
+  `Thigh` alone is not taken for either thigh. A suggestion is used only once it has been saved.
+- **Not used:** a sensor can be left out, for example a spare or an EMG sensor.
+
+Stage 1 runs only when every one of the 14 names has been given to exactly one sensor and no label is
+left undecided. The saved names are an input, like the session: they are kept in the recording's
+`sensor_names.json` and are meant to be committed. `recording.json` records the names each stage-1
+run used, so changing one marks the recording for stage 1 again, orientation filter included, since
+the assumed mounting depends on the name. Without the dashboard, `sensor_names.json` can be written by
+hand: `{"sensors": {"<label as in the file>": "<name>", …}}`, with `null` for a sensor not used.
+
+The card's figure shows which label each spot on the body has been given, so a spot with no sensor,
+or with two, stands out. Whether each sensor really was on that segment shows once it moves, on the
+Kinematics check page. Hovering a sensor on its stick figure names its label in the file, and the
+sensor table has a *recorded as* column.
 
 ### The kinematics check
 
@@ -455,6 +487,7 @@ outputs/
     sensor_inventory.csv           per-sensor sample counts, duration, sampling rate, missing values
     orientation_validation.png     lumbar and sternum orientation, for sanity-checking the filter
     sensor_check.csv               per sensor: mounting tilt, |g| at rest, stillness, knee axis, leg direction, status
+    sensor_names.json              the checked names of its sensors, {label in the file: analysis name}, where saved
   analyses/<selection>/            one folder per selection of recordings
     analysis.json                  which recordings, by name, size and SHA-256
     event_editor_session.json      the curated windows and their provenance
@@ -502,6 +535,7 @@ analysis/
   config.py               paths, default recordings and the analysis-wide switches
   signals.py              filtering, resampling, cross-correlation lag, index/time conversion
   orientation.py          quaternion algebra, Madgwick filter, sensor-mounting alignment
+  sensor_names.py         which sensor in a recording is which: the analysis's names for the labels in a file
   recordings.py           the recordings in data/, the selection, and where their outputs go
   data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
   kinematics.py           segment and joint angles; gyroscope bias and vertical reference; fast loading
@@ -522,6 +556,7 @@ analysis/
   dashboard/
     app.py                the Dash app: navigation, progress polling, the server
     pipeline_page.py      stage cards and the buttons that run them
+    names_card.py         the Sensor names card: labels, suggested names, the reference figure
     check_page.py         the kinematics check: sensor table, stick figure, joint angles
     editor_page.py        the event-window editor
     results_page.py       metric tables and figures
@@ -548,6 +583,8 @@ used without the ones after it — nothing outside `dashboard/` depends on Dash.
 - **No magnetometer.** Absolute yaw is unobservable and drifts; only tilt and relative joint angles
   are reliable in that axis. Mitigation options — functional calibration, anatomical alignment, joint
   constraints — are discussed in [docs/notes.txt](docs/notes.txt).
+- **A recording needs all 14 sensors.** Every analysis name must be given to one of its sensors;
+  recordings with fewer sensors cannot be processed yet.
 - **Two participants, one trial each.** Differences between the novice and trained recordings are
   descriptive. No statistical inference about training effects is supported by this sample.
 - **Pairs rest on the whole-recording alignment**, which is only meaningful where the form is being

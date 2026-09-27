@@ -3,7 +3,10 @@
 
 The stages work on a *selection*: a recording from ``data/`` for the novice
 role, one for the trained role, or just one of the two
-(:mod:`analysis.recordings`).
+(:mod:`analysis.recordings`).  Before stage 1 each recording's sensors need
+the names the analysis uses (:mod:`analysis.sensor_names`): read from the labels
+when they spell them, otherwise checked and saved on the dashboard's Pipeline
+page.
 
     1. preprocess   per recording: parse it, run the orientation filter, and write
                     what does not depend on event windows -- the orientation
@@ -50,7 +53,7 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from analysis import config, kinematics_check, recordings, sessions
+from analysis import config, kinematics_check, recordings, sensor_names, sessions
 from analysis.data_io import (
     TrialData,
     make_sensor_inventory,
@@ -137,6 +140,9 @@ def preprocess(
     unless ``force_orientation``.
     """
     report = progress or _silent
+    unnamed = {recording.name: recording.naming_problems() for recording in targets if recording.naming_problems()}
+    if unnamed:
+        raise ValueError(unnamed_message(unnamed))
     if not force_orientation:
         cached = [recording for recording in targets if recording.orientation_current()]
         for recording in cached:
@@ -149,7 +155,7 @@ def preprocess(
         report(f"Parsing {recording.name}")
         # Labelled by file name, not role: this stage belongs to the recording
         # and is shared by every selection it appears in.
-        parsed.append((recording, parse_IMU_csv(recording.path, recording.name)))
+        parsed.append((recording, parse_IMU_csv(recording.path, recording.name, recording.sensor_names())))
 
     raw = run_orientation_filter([trial for _, trial in parsed], report, workers)
 
@@ -196,10 +202,18 @@ def _write_recording_manifest(recording: Recording, trial: TrialData, kin: Kinem
         "n_samples": len(kin.t),
         "duration_s": round(float(kin.t[-1]), 3),
         "sensors": trial.sensors,
+        "sensor_names": recording.sensor_names(),
         "export_version": config.EXPORT_VERSION,
         "processed_utc": now.isoformat(timespec="seconds"),
         "processed_local": now.astimezone().strftime("%d %b %Y %H:%M"),
     }, indent=2))
+
+
+def unnamed_message(unnamed: dict[str, list[str]]) -> str:
+    """Why stage 1 cannot run for recordings whose sensor names are not settled, and where to settle them."""
+    return ("Name the sensors first -- on the Sensor names card of the dashboard's Pipeline page, or in "
+            "outputs/recordings/<recording>/sensor_names.json:"
+            + "".join(f"\n  {name}: {'; '.join(problems)}" for name, problems in unnamed.items()))
 
 
 def pending_preprocessing(selection: Selection | None = None) -> list[Recording]:
@@ -331,6 +345,31 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
             f"{role}: {recording.name} ({recording.size / 1e6:.0f} MB)" for role, recording in chosen.items()
         ))
 
+    named = {role: recording for role, recording in chosen.items() if recording and recording.usable}
+    if not named:
+        result["names"] = StageStatus("missing", "no recording selected")
+    else:
+        parts, unsettled = [], False
+        for role, recording in named.items():
+            problems = recording.naming_problems()
+            unsettled |= bool(problems)
+            if problems:
+                labels, current = recording.sensor_labels(), recording.sensor_names()
+                proposals = sensor_names.suggest(labels, recordings.serial_history(exclude=recording))
+                proposed = {label: name for label, (name, _, _) in proposals.items() if name}
+                left = sensor_names.problems({**proposed, **current}, labels)
+                if left:
+                    parts.append(f"{role}: " + "; ".join(left))
+                else:
+                    count = sum(label not in current for label in labels)
+                    parts.append(f"{role}: {count} sensor{'s' * (count != 1)} have suggested names: "
+                                 "check and save them on this card")
+            elif recording.sensor_names_path.exists():
+                parts.append(f"{role}: checked and saved")
+            else:
+                parts.append(f"{role}: every label spells one of the analysis names")
+        result["names"] = StageStatus("missing" if unsettled else "done", " · ".join(parts))
+
     states = {role: recording.cache_state() if recording else ("missing", "not found")
               for role, recording in chosen.items()}
     if not states:
@@ -340,6 +379,8 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
         worst = "missing" if "missing" in found else "stale" if "stale" in found else "done"
         parts = []
         for role, (state, why) in states.items():
+            if state != "done" and chosen[role] and chosen[role].naming_problems():
+                why += " (its sensors need names first)"
             check = kinematics_check.summary_of(chosen[role].sensor_check_path) if chosen[role] else None
             parts.append(f"{role}: {why}" + (f" — {check}" if state == "done" and check else ""))
         result["preprocess"] = StageStatus(worst, " · ".join(parts))
@@ -403,7 +444,12 @@ def main() -> None:
 
     if args.list:
         for recording in recordings.scan():
-            state = recording.cache_state()[1] if recording.usable else recording.problem
+            if not recording.usable:
+                state = recording.problem
+            elif recording.naming_problems():
+                state = "sensors to name: " + "; ".join(recording.naming_problems())
+            else:
+                state = recording.cache_state()[1]
             print(f"{recording.name:60} {recording.size / 1e6:6.0f} MB  {state}")
         return
 
@@ -421,7 +467,10 @@ def main() -> None:
         print(f"[{time.monotonic() - started:5.1f} s] {message}", flush=True)
 
     progress(f"Selection: {selection.describe()}")
-    result = run(selection, args.force_orientation, args.new_session, progress, args.workers)
+    try:
+        result = run(selection, args.force_orientation, args.new_session, progress, args.workers)
+    except ValueError as error:  # something to fix first: unnamed sensors, invalid windows
+        sys.exit(f"\n{error}")
     print(f"\nWrote to {selection.output_dir.relative_to(config.ROOT)}/:\n  " + "\n  ".join(result.written))
 
 

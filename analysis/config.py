@@ -74,10 +74,11 @@ SENSOR_MAP = {
     "rhand": "Right Hand",
 }
 
-EXPORT_VERSION = 2
-"""Format of the 50 Hz kinematic export, recorded in each recording's
-``recording.json``; an older one marks the export out of date, and it is
-rebuilt from the orientation cache without re-running the filter.
+EXPORT_VERSION = 3
+"""Format of the derived stage-1 outputs -- the 50 Hz kinematic export, the
+sensor inventory and the sensor check -- recorded in each recording's
+``recording.json``; an older one marks them out of date, and they are rebuilt
+from the orientation cache without re-running the filter.
 
 1. Every joint angle high-passed at 0.05 Hz, so each joint had zero mean -- a
    knee held flexed for tens of seconds lost its flexion -- and the angular
@@ -85,4 +86,7 @@ rebuilt from the orientation cache without re-running the filter.
 2. Joint x (flexion, the mediolateral axis) and y are gravity-referenced and
    exported as they are; only the axial z channels, which carry the heading
    drift of two sensors, are high-passed.  Angular speeds are bias-corrected.
+3. The sensor inventory and the sensor check name each sensor's label in the
+   file (``recorded_as``), since sensors can be named by hand
+   (:mod:`analysis.sensor_names`).
 """

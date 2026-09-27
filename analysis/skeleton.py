@@ -72,6 +72,32 @@ CONNECTIONS = [
 """Bones to draw, as (joint, joint) pairs."""
 
 
+SENSOR_SPOTS = {
+    # sensor:     (from joint,        to joint,       how far along)
+    "lumbar":     ("pelvis_center",   "neck",          0.0),
+    "chestbone":  ("pelvis_center",   "neck",          0.8),
+    "rthigh":     ("pelvis_right",    "knee_right",    0.5),
+    "lthigh":     ("pelvis_left",     "knee_left",     0.5),
+    "rtibia":     ("knee_right",      "ankle_right",   0.5),
+    "ltibia":     ("knee_left",       "ankle_left",    0.5),
+    "rfoot":      ("ankle_right",     "toe_right",     0.5),
+    "lfoot":      ("ankle_left",      "toe_left",      0.5),
+    "rhumerus":   ("shoulder_right",  "elbow_right",   0.5),
+    "lhumerus":   ("shoulder_left",   "elbow_left",    0.5),
+    "rulna":      ("elbow_right",     "wrist_right",   0.5),
+    "lulna":      ("elbow_left",      "wrist_left",    0.5),
+    "rhand":      ("wrist_right",     "hand_right",    0.5),
+    "lhand":      ("wrist_left",      "hand_left",     0.5),
+}
+"""Where each sensor is drawn: part of the way along the bone it is strapped to."""
+
+
+def sensor_positions(positions: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Each sensor's position on a figure posed by :func:`pose`."""
+    return {sensor: positions[start] + along * (positions[end] - positions[start])
+            for sensor, (start, end, along) in SENSOR_SPOTS.items()}
+
+
 def _verify_topological_order(segments: dict) -> None:
     """Raise ValueError if any joint appears before its parent in SEGMENTS."""
     seen = {"pelvis_center"}

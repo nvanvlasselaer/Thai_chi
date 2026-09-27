@@ -7,7 +7,9 @@ apart so that every file can be traced back to the recordings behind it:
     outputs/recordings/<recording>/     what depends on one recording alone: the
                                         orientation cache, the 50 Hz export, the
                                         sensor inventory, the orientation figure,
-                                        and recording.json naming the source file
+                                        recording.json naming the source file, and
+                                        sensor_names.json once its sensors' names
+                                        have been checked (:mod:`analysis.sensor_names`)
     outputs/analyses/<selection>/       what depends on the selection: the session,
                                         the metrics and figures, and analysis.json
 
@@ -32,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from analysis import config
+from analysis import config, sensor_names
 
 SELECTION_PATH = config.OUTPUT_DIR / "selection.json"
 MAX_ID_LENGTH = 80
@@ -115,6 +117,8 @@ class Recording:
     validation_figure_path = property(lambda self: self.output_dir / "orientation_validation.png")
     sensor_check_path = property(lambda self: self.output_dir / "sensor_check.csv")
     manifest_path = property(lambda self: self.output_dir / "recording.json")
+    sensor_names_path = property(lambda self: self.output_dir / "sensor_names.json")
+    """The checked names of its sensors: an input, kept with the outputs it decides."""
 
     def outputs(self) -> list[Path]:
         return [self.orientation_path, self.kinematics_path, self.inventory_path,
@@ -122,6 +126,33 @@ class Recording:
 
     def sha256(self) -> str:
         return _sha256(self.path, self.size, self.mtime_ns)
+
+    def sensor_labels(self) -> list[str]:
+        """The sensor labels in the file's header, e.g. ``L_humerus (84483)``."""
+        key = (str(self.path), self.size, self.mtime_ns)
+        if key not in _labels_cache:
+            _labels_cache[key] = sensor_names.read_labels(self.path)
+        return _labels_cache[key]
+
+    def sensor_names(self) -> dict[str, str | None]:
+        """``{label: analysis name, or None if not used}``: the saved names, else the ones the labels spell.
+
+        Stage 1 parses the recording with these; a label missing from them has
+        not been decided on (see :meth:`naming_problems`).
+        """
+        saved = sensor_names.load(self.sensor_names_path)
+        return saved if saved is not None else sensor_names.automatic(self.sensor_labels())
+
+    def naming_problems(self) -> list[str]:
+        """What keeps :meth:`sensor_names` from being used; empty when stage 1 can run."""
+        return sensor_names.problems(self.sensor_names(), self.sensor_labels())
+
+    def _names_current(self, manifest: dict) -> bool:
+        """Whether the outputs were computed with the sensor names in force now."""
+        recorded = manifest.get("sensor_names")
+        if recorded is None:  # processed before the names were recorded: the labels' own spelling was used
+            recorded = sensor_names.automatic(self.sensor_labels())
+        return sensor_names.used(recorded) == sensor_names.used(self.sensor_names())
 
     def manifest(self) -> dict | None:
         """What ``recording.json`` says the outputs were computed from, if it exists."""
@@ -148,6 +179,8 @@ class Recording:
             source.get("mtime_ns") != self.mtime_ns and source.get("sha256") != self.sha256()
         ):
             return "stale", "the file has changed since it was processed"
+        if not self._names_current(manifest):
+            return "stale", "its sensor names have changed since it was processed"
         absent = [path.name for path in self.outputs() if not path.exists()]
         if absent:
             return "stale", f"missing {', '.join(absent)}"
@@ -164,7 +197,7 @@ class Recording:
         source = manifest.get("source", {})
         return source.get("size") == self.size and (
             source.get("mtime_ns") == self.mtime_ns or source.get("sha256") == self.sha256()
-        )
+        ) and self._names_current(manifest)
 
     def export_stale(self) -> bool:
         """The 50 Hz export was written in an older format than ``config.EXPORT_VERSION``."""
@@ -177,6 +210,7 @@ class Recording:
 
 
 _sha_cache: dict[tuple[str, int, int], str] = {}
+_labels_cache: dict[tuple[str, int, int], list[str]] = {}
 
 
 def _sha256(path: Path, size: int, mtime_ns: int) -> str:
@@ -207,6 +241,25 @@ def scan() -> list[Recording]:
             mtime_ns=stat.st_mtime_ns, problem=_problem_cache[key],
         ))
     return sorted({r.name: r for r in found}.values(), key=lambda r: r.name.lower())
+
+
+def serial_history(exclude: Recording | None = None) -> dict[str, dict[str, list[str]]]:
+    """``{serial number: {analysis name: [files]}}`` over the other recordings whose names are settled.
+
+    What each physical sensor has been called before, for suggesting names in
+    a recording whose labels say nothing (:func:`analysis.sensor_names.suggest`).
+    """
+    history: dict[str, dict[str, list[str]]] = {}
+    for recording in scan():
+        if not recording.usable or (exclude is not None and recording.name == exclude.name):
+            continue
+        if recording.naming_problems():
+            continue
+        for label, name in sensor_names.used(recording.sensor_names()).items():
+            serial = sensor_names.split_label(label)[1]
+            if serial:
+                history.setdefault(serial, {}).setdefault(name, []).append(recording.name)
+    return history
 
 
 def find(name: str | None) -> Recording | None:

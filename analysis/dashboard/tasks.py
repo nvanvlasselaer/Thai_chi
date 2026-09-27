@@ -30,6 +30,14 @@ def _load(progress: Progress) -> dict[str, LoadedTrial]:
     return trials
 
 
+def _unnamed(targets: list[recordings.Recording], progress: Progress) -> bool:
+    """Report, and say so, when any of ``targets`` still has sensors without a name."""
+    unnamed = {recording.name: recording.naming_problems() for recording in targets if recording.naming_problems()}
+    if unnamed:
+        progress(pipeline.unnamed_message(unnamed))
+    return bool(unnamed)
+
+
 def _loaded(progress: Progress) -> dict[str, LoadedTrial]:
     return workspace.trials if workspace.ready else _load(progress)
 
@@ -50,6 +58,7 @@ def use_recordings(novice: str | None, trained: str | None) -> bool:
         if pending:
             progress("Not preprocessed yet: " + ", ".join(r.name for r in pending)
                      + ". Press Run pipeline to process and load them.")
+            _unnamed(pending, progress)
             return
         _load(progress)
 
@@ -61,6 +70,8 @@ def preprocess() -> bool:
 
     def task(progress: Progress) -> None:
         targets = [r for r in recordings.active().recordings().values() if r]
+        if _unnamed(targets, progress):
+            return
         pipeline.preprocess(targets, progress)
         _load(progress)  # the caches have been rewritten, so reload from them
 
@@ -89,6 +100,8 @@ def run_pipeline() -> bool:
 
     def task(progress: Progress) -> None:
         pending = pipeline.pending_preprocessing()
+        if _unnamed(pending, progress):
+            return
         if pending:
             pipeline.preprocess(pending, progress)
             trials = _load(progress)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import csv
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,6 +43,8 @@ class TrialData:
     fs: float
     sensors: list[str]
     data: dict[str, pd.DataFrame]
+    recorded_as: dict[str, str] = field(default_factory=dict)
+    """Each sensor's label in the file, by the name the analysis gives it."""
 
 
 def canonical_sensor(name: str) -> str:
@@ -50,12 +52,18 @@ def canonical_sensor(name: str) -> str:
     return stem.lower().replace("_", "")
 
 
-def parse_IMU_csv(path: Path, label: str) -> TrialData:
+def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = None) -> TrialData:
     """Parse a Delsys Trigno Discover CSV export.
 
     Eight metadata rows, then one 12-column block per sensor (ACC X/Y/Z and
     GYRO X/Y/Z, each with its own time column).  Sensor order differs between
     recordings, so blocks are matched by name rather than position.
+
+    ``names`` maps each sensor label in the file (``L_humerus (84483)``) to the
+    name the analysis uses (:mod:`analysis.sensor_names`); a sensor it maps to
+    None, or leaves out, is not read.  Without it every label is reduced to
+    its lower-case letters, which is what the labels of the first recordings
+    spell.
     """
     with path.open(newline="") as f:
         rows = [next(csv.reader(f)) for _ in range(9)]
@@ -66,8 +74,12 @@ def parse_IMU_csv(path: Path, label: str) -> TrialData:
     fs_row = rows[6]
 
     sensor_starts = [i for i, value in enumerate(sensor_row) if value.strip()]
-    sensors = [canonical_sensor(sensor_row[i]) for i in sensor_starts]
-    n_sensor_cols = len(sensors) * 12
+    labels = [sensor_row[i].strip() for i in sensor_starts]
+    if names is None:
+        blocks = [(index, canonical_sensor(text), text) for index, text in enumerate(labels)]
+    else:
+        blocks = [(index, names[text], text) for index, text in enumerate(labels) if names.get(text)]
+    n_sensor_cols = len(labels) * 12
 
     block_fs = []
     for start in sensor_starts:
@@ -79,7 +91,7 @@ def parse_IMU_csv(path: Path, label: str) -> TrialData:
     raw = raw.apply(pd.to_numeric, errors="coerce")
 
     data: dict[str, pd.DataFrame] = {}
-    for block_index, sensor in enumerate(sensors):
+    for block_index, sensor, _ in blocks:
         start = block_index * 12
         cols = raw.iloc[:, start : start + 12].copy()
         names = channel_row[start : start + 12]
@@ -105,7 +117,9 @@ def parse_IMU_csv(path: Path, label: str) -> TrialData:
         sensor_df = sensor_df.dropna(subset=["time"])
         data[sensor] = sensor_df.reset_index(drop=True)
 
-    return TrialData(label=label, path=path, duration_meta_s=duration_meta_s, fs=fs, sensors=sensors, data=data)
+    return TrialData(label=label, path=path, duration_meta_s=duration_meta_s, fs=fs,
+                     sensors=[sensor for _, sensor, _ in blocks], data=data,
+                     recorded_as={sensor: text for _, sensor, text in blocks})
 
 
 def make_sensor_inventory(trials: list[TrialData]) -> pd.DataFrame:
@@ -120,6 +134,7 @@ def make_sensor_inventory(trials: list[TrialData]) -> pd.DataFrame:
                 {
                     "recording": trial.label,
                     "sensor": sensor,
+                    "recorded_as": trial.recorded_as.get(sensor, sensor),
                     "body_segment": config.SENSOR_MAP.get(sensor, "Unmapped"),
                     "samples": len(df),
                     "duration_s": round(float(time[-1] - time[0]), 3),

@@ -347,7 +347,10 @@ def load_trial(recording: Recording, label: str) -> LoadedTrial:
             "Run the pipeline first."
         )
 
-    trial = parse_IMU_csv(recording.path, label)
+    problems = recording.naming_problems()
+    if problems:
+        raise ValueError(f"The sensor names of {recording.name} need a look: {'; '.join(problems)}.")
+    trial = parse_IMU_csv(recording.path, label, recording.sensor_names())
     n = min(len(df) for df in trial.data.values())
 
     time_s, quats = load_orientation_npz(recording.orientation_path)

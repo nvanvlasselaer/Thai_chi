@@ -1,15 +1,15 @@
-recording,sensor,body_segment,samples,duration_s,fs_hz,median_dt_s,max_dt_s,missing_channel_values,complete_accel_gyro
-IMU_Trial_3_RC_Trained.csv,chestbone,Thorax,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lfoot,Left Foot,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lhand,Left Hand,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lhumerus,Left Upper Arm,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lthigh,Left Thigh,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,ltibia,Left Shank,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lulna,Left Forearm,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,lumbar,Pelvis/Lower Trunk Proxy,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rfoot,Right Foot,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rhand,Right Hand,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rhumerus,Right Upper Arm,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rthigh,Right Thigh,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rtibia,Right Shank,87515,236.288,370.3704,0.0027,0.0027,0,True
-IMU_Trial_3_RC_Trained.csv,rulna,Right Forearm,87515,236.288,370.3704,0.0027,0.0027,0,True
+recording,sensor,recorded_as,body_segment,samples,duration_s,fs_hz,median_dt_s,max_dt_s,missing_channel_values,complete_accel_gyro
+IMU_Trial_3_RC_Trained.csv,chestbone,chestbone (84663),Thorax,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lfoot,L_foot (84643),Left Foot,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lhand,L_hand (84450),Left Hand,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lhumerus,L_humerus (84483),Left Upper Arm,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lthigh,L_thigh (84570),Left Thigh,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,ltibia,L_tibia (84492),Left Shank,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lulna,L_ulna (84551),Left Forearm,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,lumbar,lumbar (84573),Pelvis/Lower Trunk Proxy,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rfoot,R_foot (84644),Right Foot,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rhand,R_hand (84494),Right Hand,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rhumerus,R_humerus (84625),Right Upper Arm,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rthigh,R_thigh (84624),Right Thigh,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rtibia,R_tibia (84607),Right Shank,87515,236.288,370.3704,0.0027,0.0027,0,True
+IMU_Trial_3_RC_Trained.csv,rulna,R_ulna (84642),Right Forearm,87515,236.288,370.3704,0.0027,0.0027,0,True

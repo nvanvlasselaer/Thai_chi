@@ -23,6 +23,7 @@ This is where the analysis starts. Each stage has a card saying whether it is **
 | card | what it does |
 | --- | --- |
 | Recordings | which recordings to analyse — see [Choosing recordings](#choosing-recordings) below |
+| Sensor names | which sensor in each recording is which — see [Naming the sensors](#naming-the-sensors) below |
 | 1 · Orientation and kinematics | runs the orientation filter on every sensor of each selected recording and writes its orientation cache, 50 Hz joint angles, sensor inventory, orientation validation figure and sensor check. About 10 s per recording, done once: every selection that uses the recording reuses it, until the file itself changes. The card says which sensors, if any, need a look; **Check sensors and kinematics** opens the [Kinematics check](#the-kinematics-check-page) page |
 | 2 · Recordings loaded | loads the selected recordings into the app, for the editor. A few seconds, and it happens by itself when the server starts once stage 1 has been run |
 | 3 · Event windows | the session you edit in the event editor — one per selection. **New session** starts over from the source chosen beside it — the v2 detectors or the v1 detectors (fixed 8 s windows, to reproduce earlier windows) — and keeps the session it replaces in `_previous` (see [§4](#saving-and-loading-sessions)). A session saved by an older version is migrated when it is opened; the original is kept as `sessions/pre-schema-2-<name>.json` |
@@ -39,6 +40,20 @@ Pick a recording for each role, or clear one (×) to analyse a single recording,
 Each selection keeps its own session, named sessions, metrics and figures, so switching back later returns to the curation exactly as you left it. With one recording selected, the editor shows one graph and every event has one window; the tables and figures hold that recording alone.
 
 Every output says where it came from: the folder is named after the recordings, `analysis.json` and each recording's `recording.json` record the exact file (name, size, SHA-256), every table has a `recording` column, and every figure names its files underneath.
+
+### Naming the sensors
+
+The analysis knows its 14 sensors by fixed names — `chestbone`, `lumbar`, `lthigh`, `ltibia`, `lfoot`, `lhumerus`, `lulna`, `lhand` and the same on the right — and each name decides how that sensor is assumed to sit on the body. A recording labels its sensors however they were set up in Trigno Discover, a text and the sensor's serial number, such as `L_humerus (84483)`. Before stage 1, every label needs one of the names.
+
+When the labels spell the names, as they do in the two original recordings, there is nothing to do: the card says *done*. Otherwise open **Show the sensors** (it opens by itself when something needs a look) and choose the recording at the top. The table lists every label in the file, the name suggested for it, and how it was found:
+
+- *the label spells it*: `L_humerus` → `lhumerus`;
+- *reads as*: the label's words, such as `Left Upper Arm`, `R_Shank`, `Sternum` or `Sacrum`. A label without a side (`Thigh`) is not taken for either side;
+- *sensor 84483 is lhumerus in …*: a label that says nothing (`Sensor 3 (84483)`) gets the name its serial number had in another recording. The same sensor may have been strapped to another segment this time, so check these against how the sensors were placed.
+
+Change any name with its dropdown, or choose **not used** for a sensor the analysis should leave out. The figure beside the table shows the body from the front with each sensor spot labelled with what it has been given: a spot marked **no sensor** (red) or **2 sensors** (orange) needs fixing, and the list under the table says what else does. When every name has been given exactly once, **Save these names** writes them to the recording's `sensor_names.json`, and **Run pipeline** processes the recording with them. **Back to the suggestions** discards your changes.
+
+Saving different names for a recording that has been processed marks it for stage 1 again. The figure only shows what was *assigned*; whether each sensor really sat on that segment shows on the Kinematics check page, where the *recorded as* column and the stick figure's sensor markers name each sensor's label in the file.
 
 ### The Kinematics check page
 

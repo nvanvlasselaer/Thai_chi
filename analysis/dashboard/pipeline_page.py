@@ -1,8 +1,9 @@
 """The Pipeline page: which recordings, what has been computed, and buttons to run it.
 
 The first card chooses the recordings: every CSV in ``data/`` is offered for the
-novice and the trained role, and either may be left empty.  Below it, one card
-per stage of :mod:`analysis.pipeline`, each with its status and the button that
+novice and the trained role, and either may be left empty.  The second names
+their sensors (:mod:`analysis.dashboard.names_card`).  Below them, one card per
+stage of :mod:`analysis.pipeline`, each with its status and the button that
 re-runs it, and a single "Run pipeline" button that runs whatever is missing or
 out of date.  The progress of the running job and its log are shown
 underneath, refreshed by the one-second poll.
@@ -14,7 +15,7 @@ from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from analysis import config, pipeline, recordings, sessions
-from analysis.dashboard import tasks
+from analysis.dashboard import names_card, tasks
 from analysis.dashboard.state import jobs, workspace
 from analysis.recordings import Selection
 
@@ -29,7 +30,7 @@ PRIMARY = {**BUTTON, "padding": "8px 18px", "fontSize": "14px", "fontWeight": "6
            "backgroundColor": "#2a9d8f", "color": "white", "border": "none", "borderRadius": "4px"}
 ACTION_BUTTONS = ("btn-run-all", "btn-stage-preprocess", "btn-stage-load", "btn-stage-detect", "btn-stage-recalc")
 
-STAGE_KEYS = ("recordings", "preprocess", "load", "session", "metrics")
+STAGE_KEYS = ("recordings", "names", "preprocess", "load", "session", "metrics")
 CACHE_NOTE = {"done": "processed", "stale": "preprocess again", "missing": "not processed yet"}
 """Short state of a recording's stage-1 outputs; the card below says why one is stale."""
 
@@ -40,7 +41,7 @@ def recording_options() -> list[dict]:
     for recording in recordings.scan():
         size = f"{recording.size / 1e6:.0f} MB"
         if recording.usable:
-            note = CACHE_NOTE[recording.cache_state()[0]]
+            note = "sensors to name" if recording.naming_problems() else CACHE_NOTE[recording.cache_state()[0]]
             options.append({"label": f"{recording.name}  ·  {size}  ·  {note}", "value": recording.name})
         else:
             options.append({"label": f"{recording.name}  ·  {recording.problem}", "value": recording.name,
@@ -71,6 +72,12 @@ def _stages() -> list[tuple]:
                       style={**BUTTON, "alignSelf": "flex-end"}),
           html.Div(id="selection-hint", style={"flexBasis": "100%", "fontSize": "12px", "color": "#555"}),
           html.Div(id="catalogue-summary", style={"flexBasis": "100%", "fontSize": "11px", "color": "#888"})]),
+        ("names", "Input", "Sensor names",
+         "Which sensor in each recording is which. The analysis knows its 14 sensors by fixed names, which "
+         "decide how each is assumed to sit on the body. Where a label in the file spells one of them it is "
+         "used as it is; otherwise a name is suggested -- from what the label reads as, or from the name "
+         "the same serial number has in another recording -- and used once saved here.",
+         [names_card.layout()]),
         ("preprocess", "1", "Orientation and kinematics",
          "Parse each selected recording and run the Madgwick orientation filter on every sensor, in "
          "parallel. Writes the orientation cache, the 50 Hz kinematic CSV, the sensor inventory, the "
@@ -175,7 +182,7 @@ def layout() -> html.Div:
         ], style={"display": "none"}),
 
         html.Div(id="pipeline-settings", style={"fontSize": "12px", "color": "#777", "marginTop": "16px"}),
-    ], style={"maxWidth": "1000px", "margin": "0 auto", "padding": "20px 24px"}),
+    ], style={"maxWidth": "1180px", "margin": "0 auto", "padding": "20px 24px"}),
         style={"height": "100%", "overflowY": "auto", "backgroundColor": "#f7f7f5"})
 
 
@@ -199,6 +206,7 @@ STAGE_OF_MESSAGE = (
     (("Parsing", "Orientation filter", "Deriving", "Drawing", "Rebuilding", "Sensor check"), "preprocess"),
     (("Loading the", "Preparing the event editor"), "load"),
     (("Selected", "Not preprocessed yet"), "recordings"),
+    (("Name the sensors",), "names"),
     (("Detecting events", "Session migrated"), "session"),
     (("Recalculating", "Trunk rotation:", "Single-leg stance:", "Sequence turns:", "WARNING", "note"), "metrics"),
 )
@@ -233,6 +241,7 @@ def _job_panel(snapshot: dict) -> tuple:
 
 def register_callbacks(app: Dash) -> None:
     keys = STAGE_KEYS
+    names_card.register_callbacks(app)
 
     # One callback refreshes the whole page on every poll while it is open:
     # the status is read from a few small files, and edits made in the editor

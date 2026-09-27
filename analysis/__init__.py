@@ -6,6 +6,7 @@ modules listed above it, so any stage can be used without the ones after it.
     config             paths, recordings and analysis-wide switches
     signals             filtering, resampling and other signal primitives
     orientation         quaternion algebra, Madgwick filter, sensor-mounting alignment
+    sensor_names        which sensor in a recording is which: the analysis's names for its labels
     recordings          the recordings in data/, the selection, and where their outputs go
     data_io             Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
     kinematics          segment and joint kinematics of one recording; gyroscope bias and vertical reference

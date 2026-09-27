@@ -28,9 +28,9 @@ from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
 from analysis import kinematics_check
-from analysis.config import TRIALS
+from analysis.config import SENSOR_MAP, TRIALS
 from analysis.dashboard.state import workspace
-from analysis.skeleton import CONNECTIONS, SEGMENTS, pose
+from analysis.skeleton import CONNECTIONS, SEGMENTS, pose, sensor_positions
 
 DISPLAY_FS = 25.0
 """Rate everything on this page is drawn at: plenty for movements this slow."""
@@ -56,6 +56,7 @@ VIEWS = {
 
 TABLE_COLUMNS = [
     ("sensor", "sensor"),
+    ("recorded_as", "recorded as"),
     ("segment", "segment"),
     ("mounting_tilt_deg", "mounting tilt (deg)"),
     ("gravity_at_rest_g", "|g| at rest"),
@@ -101,6 +102,7 @@ def prepared(label: str | None) -> dict | None:
             "neutral_s": (neutral[0] / fs, neutral[1] / fs),
             "quiet_s": [(start / fs, end / fs) for start, end in kin.calibration.quiet_spans],
             "duration_s": loaded.duration_s,
+            "recorded_as": loaded.trial.recorded_as,
         }
     return _prepared[key]
 
@@ -152,6 +154,18 @@ def skeleton_figure(data: dict, time_s: float, options: list[str], view: str = "
         x=[float(positions[j][0]) for j in joints], y=[float(positions[j][1]) for j in joints],
         z=[float(positions[j][2]) for j in joints], mode="markers", text=joints,
         hovertemplate="%{text}<extra></extra>", marker={"size": 3, "color": "#222222"}, name="joints",
+    ))
+    # Each sensor on its segment; hovering one names its label in the file, to trace a misplaced one.
+    spots = {sensor: spot for sensor, spot in sensor_positions(positions).items() if sensor in data["recorded_as"]}
+    sides = [SENSOR_MAP.get(sensor, "").split(" ")[0] for sensor in spots]
+    figure.add_trace(go.Scatter3d(
+        x=[float(p[0]) for p in spots.values()], y=[float(p[1]) for p in spots.values()],
+        z=[float(p[2]) for p in spots.values()], mode="markers", name="sensors",
+        text=[f"{sensor} ← {data['recorded_as'][sensor]}" for sensor in spots],
+        hovertemplate="%{text}<extra></extra>",
+        marker={"size": 5, "symbol": "diamond", "line": {"width": 1, "color": "white"},
+                "color": [LEFT_COLOUR if side == "Left" else RIGHT_COLOUR if side == "Right" else CENTRE_COLOUR
+                          for side in sides]},
     ))
     # No sensor on the head: it is drawn on the chest's axis, so the figure reads at a glance.
     head = positions["neck"] + rotations["neck"].apply(HEAD_OFFSET)
