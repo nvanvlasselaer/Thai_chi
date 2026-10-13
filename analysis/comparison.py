@@ -25,6 +25,9 @@ PAIRED_METRICS = {
         "trunk_pelvis_lag_s",
         "trunk_yaw_sparc",
         "trunk_yaw_excursion_deg",
+        "com_weight_transfer",
+        "com_height_range_pct_height",
+        "com_lowering_pct_height",
         "lumbar_ml_acc_rms_mps2",
         "lumbar_ap_acc_rms_mps2",
         "lumbar_frontal_tilt_sd_deg",
@@ -40,6 +43,8 @@ PAIRED_METRICS = {
         "support_frontal_tilt_sd_deg",
         "support_sagittal_tilt_sd_deg",
         "support_rms_angular_velocity_dps",
+        "support_com_height_range_pct_height",
+        "support_com_lowering_pct_height",
         "settle_ml_acc_rms_mps2",
         "time_to_stabilization_s",
     ),
@@ -52,6 +57,9 @@ PAIRED_METRICS = {
         "chest_pelvis_lag_s",
         "chest_pelvis_gain",
         "relative_yaw_range_deg",
+        "com_weight_transfer",
+        "com_height_range_pct_height",
+        "com_lowering_pct_height",
     ),
 }
 """Per family, the metrics compared.  Lags of the single-leg family are left

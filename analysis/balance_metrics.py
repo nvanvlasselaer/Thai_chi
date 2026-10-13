@@ -3,9 +3,10 @@
 Each event has a movement window and a stabilization window that follows it.
 The movement window is scored for trunk-pelvis coordination and smoothness --
 for a single-leg stance it is the support phase itself, lift-off to
-touch-down, and its sway is scored too -- and the stabilization window for
-postural sway, tilt and angular activity.  The third family, the turns of the
-sequence, is scored in :mod:`analysis.smoothness_metrics`.
+touch-down, and its sway is scored too -- and for what the centre of mass did
+(:mod:`analysis.com`), and the stabilization window for postural sway, tilt
+and angular activity.  The third family, the turns of the sequence, is scored
+in :mod:`analysis.smoothness_metrics`.
 
 Sway is the lumbar acceleration with gravity removed, in the pelvis-heading
 frame (:func:`analysis.gravity.linear_acceleration`), reported as RMS about the
@@ -17,6 +18,10 @@ acceleration variance was taken in sensor axes, where tilt-projected gravity
 was 2-30 times the sway, with its AP and ML labels swapped; the orientation
 "variability" was dominated by yaw; and the raw gyroscope magnitude carried
 6.6 deg/s of lumbar bias, enough to reverse which participant looked busier.
+
+A recording without some of the sensors leaves the signals that need them out
+(None) and the columns that need those NaN, as :data:`analysis.coverage.METRICS`
+lists; everything else is computed as usual.
 """
 
 from __future__ import annotations
@@ -26,6 +31,8 @@ import pandas as pd
 from scipy.signal import find_peaks
 
 from analysis import detection
+from analysis.com import com_metrics, com_signals
+from analysis.coverage import blank_unmeasured
 from analysis.data_io import TrialData
 from analysis.gravity import leg_lift_index, linear_acceleration, tilt_deg
 from analysis.kinematics import Kinematics
@@ -41,19 +48,27 @@ from analysis.smoothness_metrics import sparc, turn_signals, yaw_lag
 def balance_signals(
     kin: Kinematics, trial: TrialData, fs: float, stab_params: detection.StabilizationParams | None = None
 ) -> dict[str, object]:
-    """Everything the balance metrics slice, for one recording."""
-    lumbar_sagittal, lumbar_frontal = tilt_deg(kin, "lumbar")
-    _, chest_frontal = tilt_deg(kin, "chestbone")
+    """Everything the balance metrics slice, for one recording; None for what its sensors do not allow.
+
+    ``lift`` is the measured lift index only: the stand-in the single-leg
+    detector may use to place windows (:func:`analysis.detection.lift_signal`)
+    is not good enough to report.
+    """
+    lumbar, chest = kin.has("lumbar"), kin.has("chestbone")
     signals: dict[str, object] = dict(turn_signals(kin, trial, fs))
+    if lumbar:
+        lumbar_sagittal, lumbar_frontal = tilt_deg(kin, "lumbar")
+    lift = leg_lift_index(kin)
     signals.update({
-        "sway": linear_acceleration(kin, trial, "lumbar"),
-        "lumbar_sagittal_tilt": lowpass_signal(lumbar_sagittal, fs, cutoff_hz=4.0),
-        "lumbar_frontal_tilt": lowpass_signal(lumbar_frontal, fs, cutoff_hz=4.0),
-        "chest_frontal_tilt": lowpass_signal(chest_frontal, fs, cutoff_hz=4.0),
-        "lumbar_omega": kin.omega_mag["lumbar"],
-        "lift": lowpass_signal(leg_lift_index(kin), fs, cutoff_hz=detection.LIFT_CUTOFF_HZ),
+        "sway": linear_acceleration(kin, trial, "lumbar") if lumbar else None,
+        "lumbar_sagittal_tilt": lowpass_signal(lumbar_sagittal, fs, cutoff_hz=4.0) if lumbar else None,
+        "lumbar_frontal_tilt": lowpass_signal(lumbar_frontal, fs, cutoff_hz=4.0) if lumbar else None,
+        "chest_frontal_tilt": lowpass_signal(tilt_deg(kin, "chestbone")[1], fs, cutoff_hz=4.0) if chest else None,
+        "lumbar_omega": kin.omega_mag["lumbar"] if lumbar else None,
+        "lift": lowpass_signal(lift, fs, cutoff_hz=detection.LIFT_CUTOFF_HZ) if lift is not None else None,
         "stability": detection.combined_omega(kin, fs, stab_params),
-        "corrective_threshold": corrective_threshold(kin.omega_mag["lumbar"], fs),
+        "corrective_threshold": corrective_threshold(kin.omega_mag["lumbar"], fs) if lumbar else None,
+        **com_signals(kin, fs),
     })
     return signals
 
@@ -88,7 +103,12 @@ def sway_metrics(signals: dict[str, object], fs: float, window: slice, prefix: s
     orientation estimate is not sway.  ``corrective_peak_rate_hz`` is kept as a
     secondary measure -- it was zero in 15 of 20 windows -- and
     ``rms_angular_velocity_dps``, which needs no threshold, is the primary one.
+    NaN throughout without the lumbar sensor.
     """
+    if signals["sway"] is None:
+        return {f"{prefix}{name}": float("nan") for name in (
+            "ml_acc_rms_mps2", "ap_acc_rms_mps2", "frontal_tilt_sd_deg", "sagittal_tilt_sd_deg",
+            "rms_angular_velocity_dps", "corrective_peak_rate_hz")}
     sway = signals["sway"][window]
     omega = signals["lumbar_omega"][window]
     duration_s = max((window.stop - window.start) / fs, 1e-9)
@@ -105,6 +125,9 @@ def sway_metrics(signals: dict[str, object], fs: float, window: slice, prefix: s
 
 
 def _quiet_z(signals: dict[str, object], start: int, end: int) -> float:
+    """The reported quietness of a window: only on both trunk sensors, which is what it is defined on."""
+    if not signals["stability"].complete:
+        return float("nan")
     return detection.window_quietness(signals["stability"], start, end)[1]
 
 
@@ -126,19 +149,23 @@ def compute_trunk_rotation_balance_metrics(
     Smoothness is SPARC of the trunk-on-pelvis turning speed over the event.
     It replaces the dimensionless jerk of the lumbar Euler x angle -- which was
     pelvic pitch, not the lateral weight shift it was named for, and dominated
-    by noise.
+    by noise.  The weight shift itself is ``com_weight_transfer``, with the
+    centre of mass's rise and depth, over the rotation (:func:`analysis.com.com_metrics`).
     """
-    n = len(signals["chest_rate"])
+    n = signals["n_samples"]
     if lag_pad_s is None:
         lag_window = slice(start, end)
     else:
         pad = int(round(lag_pad_s * fs))
         lag_window = slice(max(0, start - pad), min(n, end + pad))
     r, lag = yaw_lag(signals, fs, lag_window)
-    relative_rate = signals["chest_rate"][start:end] - signals["pelvis_rate"][start:end]
+    if signals["chest_rate"] is not None and signals["pelvis_rate"] is not None:
+        relative_rate = signals["chest_rate"][start:end] - signals["pelvis_rate"][start:end]
+    else:
+        relative_rate = np.full(max(0, end - start), np.nan)
     relative_angle = np.cumsum(relative_rate) / fs
 
-    return {
+    row = {
         "trial": label,
         "event_id": event_id,
         "event_start_s": start / fs,
@@ -151,9 +178,11 @@ def compute_trunk_rotation_balance_metrics(
         "trunk_yaw_sparc": sparc(relative_rate, fs),
         "trunk_yaw_excursion_deg": float(np.ptp(relative_angle)) if len(relative_angle) else float("nan"),
         "trunk_yaw_peak_rate_dps": float(np.max(np.abs(relative_rate))) if len(relative_rate) else float("nan"),
+        **com_metrics(signals, slice(start, end)),
         **sway_metrics(signals, fs, slice(stab_start, stab_end), "lumbar_"),
         "stabilization_quiet_z": _quiet_z(signals, stab_start, stab_end),
     }
+    return blank_unmeasured(row, signals["sensors"], "trunk")
 
 
 # ---------------------------------------------------------------------------
@@ -161,29 +190,47 @@ def compute_trunk_rotation_balance_metrics(
 # ---------------------------------------------------------------------------
 
 
-def _leg_flexion(kin: Kinematics, joint: str, leg: str, fs: float) -> np.ndarray:
+def _leg_flexion(kin: Kinematics, joint: str, leg: str, fs: float) -> np.ndarray | None:
+    """|flexion| of one leg's knee or hip, or None without its sensors."""
+    side = leg.lower()[0]
+    sensors = (f"{side}thigh", f"{side}tibia") if joint == "knee" else ("lumbar", f"{side}thigh")
+    if not kin.has(*sensors):
+        return None
     angles = getattr(kin, f"{leg.lower()}_{joint}_deg")[:, 0]
     return np.abs(lowpass_signal(angles, fs, cutoff_hz=6.0))
+
+
+def _peak(values: np.ndarray | None) -> float:
+    return float(np.max(values)) if values is not None and len(values) else float("nan")
 
 
 def summarize_single_leg_event(
     label: str, kin: Kinematics, fs: float, event_id: str, lifted_leg: str, start: int, end: int,
     lift: np.ndarray,
 ) -> dict[str, float | str]:
-    """Where and how high the foot went, and what the knee did: the event-window row."""
-    peak = detection.peak_lift_index(lift, start, end, lifted_leg)
-    knee = _leg_flexion(kin, "knee", lifted_leg, fs)[start:end]
-    return {
+    """Where and how high the foot went, and what the knee did: the event-window row.
+
+    ``lift`` is None without a thigh or shank sensor, and then so are the
+    time and height of the highest lift.
+    """
+    knee = _leg_flexion(kin, "knee", lifted_leg, fs)
+    if lift is not None:
+        peak = detection.peak_lift_index(lift, start, end, lifted_leg)
+        peak_time, peak_lift = peak / fs, float(abs(lift[peak]))
+    else:
+        peak_time = peak_lift = float("nan")
+    row = {
         "trial": label,
         "event_id": event_id,
         "lifted_leg": lifted_leg,
         "stance_leg": "Right" if lifted_leg == "Left" else "Left",
         "window_start_s": start / fs,
         "window_end_s": end / fs,
-        "peak_time_s": peak / fs,
-        "peak_lift_index": float(abs(lift[peak])),
-        "peak_knee_flexion_deg": float(np.max(knee)) if len(knee) else float("nan"),
+        "peak_time_s": peak_time,
+        "peak_lift_index": peak_lift,
+        "peak_knee_flexion_deg": _peak(knee[start:end] if knee is not None else None),
     }
+    return blank_unmeasured(row, kin.sensors, "knee", lifted_leg)
 
 
 def compute_single_leg_metrics(
@@ -195,9 +242,11 @@ def compute_single_leg_metrics(
 
     The event window is the support phase, lift-off to touch-down, and is
     where the base of support is one foot: its sway, tilt and angular activity
-    are the single-leg balance measures (``support_*``).  The stabilization
-    window after touch-down gives the same measures for settling (``settle_*``),
-    and ``time_to_stabilization_s`` is counted from touch-down.
+    are the single-leg balance measures (``support_*``), with how far the
+    centre of mass rose and how low it sat (``support_com_*``) -- but no weight
+    transfer, all the weight being on the stance foot throughout.  The
+    stabilization window after touch-down gives the sway measures for settling
+    (``settle_*``), and ``time_to_stabilization_s`` is counted from touch-down.
 
     The knee is described rather than thresholded: ``knee_extension_while_lifted_deg``
     is how far it straightened after its deepest flexion while the foot was
@@ -209,41 +258,51 @@ def compute_single_leg_metrics(
     they picked anti-phase peaks -- so they are kept out of the figures.
     """
     lift = signals["lift"]
-    peak = detection.peak_lift_index(lift, start, end, lifted_leg)
-    knee = _leg_flexion(kin, "knee", lifted_leg, fs)[start:end]
-    hip = _leg_flexion(kin, "hip", lifted_leg, fs)[start:end]
-    deepest = int(np.argmax(knee)) if len(knee) else 0
-    still_up = (np.abs(lift[start:end]) >= 0.5 * abs(lift[peak])) & (np.arange(len(knee)) >= deepest)
+    knee = _leg_flexion(kin, "knee", lifted_leg, fs)
+    hip = _leg_flexion(kin, "hip", lifted_leg, fs)
+    knee = knee[start:end] if knee is not None else None
+    deepest = int(np.argmax(knee)) if knee is not None and len(knee) else 0
+    nan = float("nan")
+    peak_lift = tilt_at_peak = extension = yaw_r = yaw_lag_s = frontal_r = frontal_lag = nan
+    if lift is not None:
+        peak = detection.peak_lift_index(lift, start, end, lifted_leg)
+        peak_lift = float(abs(lift[peak]))
+        if knee is not None:
+            still_up = (np.abs(lift[start:end]) >= 0.5 * abs(lift[peak])) & (np.arange(len(knee)) >= deepest)
+            extension = float(knee[deepest] - np.min(knee[still_up])) if still_up.any() else 0.0
+        if signals["lumbar_frontal_tilt"] is not None:
+            tilt_at_peak = float(signals["lumbar_frontal_tilt"][peak])
 
-    n = len(lift)
-    lag_window = slice(max(0, peak - int(round(lag_window_s[0] * fs))),
-                       min(n, peak + int(round(lag_window_s[1] * fs))))
-    yaw_r, yaw_lag_s = yaw_lag(signals, fs, lag_window)
-    frontal_r, frontal_lag = pearson_lag(signals["lumbar_frontal_tilt"][lag_window],
-                                         signals["chest_frontal_tilt"][lag_window], fs)
+        n = len(lift)
+        lag_window = slice(max(0, peak - int(round(lag_window_s[0] * fs))),
+                           min(n, peak + int(round(lag_window_s[1] * fs))))
+        yaw_r, yaw_lag_s = yaw_lag(signals, fs, lag_window)
+        if signals["lumbar_frontal_tilt"] is not None and signals["chest_frontal_tilt"] is not None:
+            frontal_r, frontal_lag = pearson_lag(signals["lumbar_frontal_tilt"][lag_window],
+                                                 signals["chest_frontal_tilt"][lag_window], fs)
 
-    return {
+    row = {
         "trial": label,
         "event_id": event_id,
         "lifted_leg": lifted_leg,
         "stance_leg": "Right" if lifted_leg == "Left" else "Left",
         "support_duration_s": (end - start) / fs,
-        "peak_lift_index": float(abs(lift[peak])),
-        "peak_knee_flexion_deg": float(knee[deepest]) if len(knee) else float("nan"),
-        "knee_extension_while_lifted_deg": (
-            float(knee[deepest] - np.min(knee[still_up])) if still_up.any() else 0.0
-        ),
-        "peak_hip_flexion_deg": float(np.max(hip)) if len(hip) else float("nan"),
-        "lumbar_frontal_tilt_at_peak_deg": float(signals["lumbar_frontal_tilt"][peak]),
+        "peak_lift_index": peak_lift,
+        "peak_knee_flexion_deg": float(knee[deepest]) if knee is not None and len(knee) else nan,
+        "knee_extension_while_lifted_deg": extension,
+        "peak_hip_flexion_deg": _peak(hip[start:end] if hip is not None else None),
+        "lumbar_frontal_tilt_at_peak_deg": tilt_at_peak,
         **sway_metrics(signals, fs, slice(start, end), "support_"),
+        **com_metrics(signals, slice(start, end), "support_", weight_transfer=False),
         **sway_metrics(signals, fs, slice(stab_start, stab_end), "settle_"),
-        "time_to_stabilization_s": (stab_start - end) / fs,
+        "time_to_stabilization_s": (stab_start - end) / fs if signals["stability"].complete else nan,
         "stabilization_quiet_z": _quiet_z(signals, stab_start, stab_end),
         "trunk_pelvis_yaw_r": yaw_r,
         "trunk_pelvis_lag_s": yaw_lag_s,
         "trunk_pelvis_frontal_r": frontal_r,
         "trunk_pelvis_frontal_lag_s": frontal_lag,
     }
+    return blank_unmeasured(row, kin.sensors, "knee", lifted_leg)
 
 
 ASYMMETRY_METRICS = (

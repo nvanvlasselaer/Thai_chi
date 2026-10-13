@@ -16,7 +16,12 @@ taken on trust:
 * the whole-recording alignment puts each single-leg stance on its partner;
 * the lift detector finds each stance on the right leg;
 * every pair in the session is the same movement;
-* dimensionless jerk is explained by duration and amplitude.
+* dimensionless jerk is explained by duration and amplitude;
+* the orientation filter takes a slow translation for a tilt, so the lumbar
+  acceleration cannot see a weight shift;
+* the centre of mass is over the stance foot through single-leg support, the
+  two ankles agree on the floor, the arms change little, and leaving steps
+  out keeps the weight index inside 0-1.
 """
 
 from __future__ import annotations
@@ -29,13 +34,15 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
-from analysis import alignment, detection, recordings, sessions
+from analysis import alignment, com, detection, recordings, sessions
 from analysis.data_io import ACC_COLUMNS
-from analysis.gravity import linear_acceleration, vertical_angular_velocity
+from analysis.gravity import STANDARD_GRAVITY, leg_lift_index, linear_acceleration, vertical_angular_velocity
 from analysis.kinematics import load_all_trials
-from analysis.orientation import mounting_matrix
-from analysis.signals import lowpass_signal, pearson_lag
+from analysis.kinematics_check import dedrifted_rotations
+from analysis.orientation import madgwick_imu, mounting_matrix
+from analysis.signals import extract_contiguous_runs, lowpass_signal, pearson_lag
 from analysis.smoothness_metrics import dimensionless_jerk, sparc
 from analysis.validation import MIN_PAIR_OVERLAP, pair_overlap
 
@@ -102,6 +109,51 @@ def synthetic_checks() -> None:
     check("SPARC matches the reference (padlevel 4)", abs(sparc(speed, fs) - reference_sparc(speed, fs)) < 1e-9,
           f"{sparc(speed, fs):.4f} vs {reference_sparc(speed, fs):.4f}")
 
+    gains = translation_gains((0.1, 0.2, 0.3, 0.5, 1.0), fs)
+    check("the orientation filter takes a slow translation for a tilt", max(gains[0.1], gains[0.2]) < 0.05 < 0.9 < gains[1.0],
+          "a 10 cm sway along AP comes out of the filter and gravity removal with gain "
+          + ", ".join(f"{gain:.3f} at {f:g} Hz" for f, gain in gains.items())
+          + " -- a weight shift over 4-8 s is 0.06-0.12 Hz")
+
+
+def translation_gains(frequencies_hz: tuple[float, ...], fs: float, amplitude_m: float = 0.10,
+                      duration_s: float = 120.0) -> dict[float, float]:
+    """How much of a pure horizontal translation survives the Madgwick filter and gravity removal.
+
+    A lumbar sensor in its neutral mounting standing still, with accelerometer
+    and gyroscope noise as measured in quiet standing (0.004 g, 0.4 deg/s), is
+    moved sinusoidally along AP without rotating; the gain is the in-phase
+    share of the true acceleration in the linear acceleration recovered the
+    way :func:`analysis.gravity.linear_acceleration` recovers it.
+    """
+    n = int(duration_s * fs)
+    t = np.arange(n) / fs
+    mounting = mounting_matrix("lumbar")
+    still_g = np.array([0.0, 0.0, 1.0]) @ mounting  # gravity in sensor axes, body upright
+
+    def recovered(body_acc: np.ndarray) -> np.ndarray:
+        rng = np.random.default_rng(0)  # the same noise with and without the translation
+        acc = still_g + rng.normal(0.0, 0.004, (n, 3)) + (body_acc / STANDARD_GRAVITY) @ mounting
+        gyro = rng.normal(0.0, 0.4, (n, 3))
+        up = (Rotation.from_quat(madgwick_imu(acc, gyro, fs)[:, [1, 2, 3, 0]]).inv().apply([0.0, 0.0, 1.0])
+              @ mounting.T)
+        axis = np.cross(up, [0.0, 0.0, 1.0])
+        sin = np.linalg.norm(axis, axis=1)
+        scale = np.divide(np.arctan2(sin, up[:, 2]), sin, out=np.ones_like(sin), where=sin > 1e-12)
+        return Rotation.from_rotvec(axis * scale[:, None]).apply(acc @ mounting.T)[:, 1] * STANDARD_GRAVITY
+
+    still = recovered(np.zeros((n, 3)))
+    inner = slice(int(15 * fs), n - int(15 * fs))
+    gains = {}
+    for frequency in frequencies_hz:
+        true = np.zeros((n, 3))
+        true[:, 1] = (-amplitude_m * (2 * np.pi * frequency) ** 2 * np.sin(2 * np.pi * frequency * t)
+                      * np.clip(np.minimum(t, duration_s - t) / 5.0, 0.0, 1.0))
+        difference = lowpass_signal(recovered(true) - still, fs, cutoff_hz=10.0)
+        x = true[inner, 1]
+        gains[frequency] = float(np.dot(difference[inner], x) / np.dot(x, x))
+    return gains
+
 
 def data_checks() -> None:
     selection = recordings.active()
@@ -160,6 +212,8 @@ def data_checks() -> None:
                 check(f"{event['event_id']} leg agrees with the lift index", inside == [event.get("lifted_leg")],
                       f"labelled {event.get('lifted_leg')}, detected {inside or 'nothing'}")
 
+        centre_of_mass_checks(label, loaded, session)
+
     if aligned is not None and session:
         print("Alignment and pairing")
         errors = []
@@ -199,6 +253,61 @@ def data_checks() -> None:
             check("duration and amplitude explain log10 dimensionless jerk", r2 > 0.8,
                   f"log10 DJ = {beta[0]:.2f} + {beta[1]:.2f} log10 D {beta[2]:+.2f} log10 A, R^2 = {r2:.3f} "
                   f"(a noise floor predicts +6 / -2), n = {len(rows)} turns")
+
+
+def centre_of_mass_checks(label: str, loaded, session: dict | None) -> None:
+    """What must hold for the centre of mass, whatever the participant does."""
+    kin, fs = loaded.kin, loaded.fs
+    centre = com.centre_of_mass(kin, fs)
+    check("the neutral pose puts the centre of mass at Winter's height", abs(centre.neutral_height - 0.58) < 0.01,
+          f"{100 * centre.neutral_height:.1f} % of body height")
+
+    index = centre.weight_index
+    if session:
+        for event in session.get("knee_events", []):
+            window = event["windows"].get(label)
+            if not window:
+                continue
+            part = slice(window["event_start"], window["event_end"])
+            stance_end = 1.0 if event.get("lifted_leg") == "Left" else 0.0
+            error = np.abs(index[part] - stance_end)[centre.feet_apart[part]]
+            check(f"{event['event_id']}: the centre of mass is over the stance foot", np.median(error) < 0.1,
+                  f"weight index within {np.median(error):.3f} of {stance_end:.0f} (median), "
+                  f"{np.percentile(error, 95):.2f} (95th percentile) through the support")
+
+    # Both feet planted through a weight shift: the floor under each ankle is the same.
+    feet = [lowpass_signal(kin.omega_mag[sensor], fs, 2.0) for sensor in ("lfoot", "rfoot")]
+    lift = lowpass_signal(leg_lift_index(kin), fs, 2.0)
+    planted = (np.abs(lift) < 0.10) & (feet[0] < 10.0) & (feet[1] < 10.0)
+    ranges = []
+    for start, end in extract_contiguous_runs(planted):
+        travel = np.ptp(centre.position[start:end, :2] - centre.ankles["Left"][start:end, :2], axis=0)
+        if (end - start) / fs >= 2.0 and np.hypot(*travel) > 0.05:
+            ranges.append(np.ptp(centre.ankles["Right"][start:end, 2] - centre.ankles["Left"][start:end, 2]))
+    if ranges:
+        check("both ankles agree on the floor through a weight shift", np.median(ranges) < 0.03,
+              f"their height difference ranges over {100 * np.median(ranges):.2f} % of body height (median, "
+              f"max {100 * max(ranges):.2f}) in {len(ranges)} shifts of the centre of mass by > 5 % with the feet still")
+
+    # The arms held hanging from the chest instead of measured: a tenth of the mass.
+    rotations = com.levelled_rotations(kin, dedrifted_rotations(kin, fs))
+    hanging = dict(rotations, **{f"{side}{name}": rotations["chestbone"]
+                                 for side in "lr" for name in ("humerus", "ulna", "hand")})
+    parts, ankles = com.segments(hanging)
+    position = sum(mass * point for mass, point in parts) / sum(mass for mass, _ in parts)
+    between = ankles["Right"][:, :2] - ankles["Left"][:, :2]
+    hanging_index = lowpass_signal(np.sum((position[:, :2] - ankles["Left"][:, :2]) * between, axis=1)
+                                   / np.maximum(np.linalg.norm(between, axis=1), 1e-9) ** 2, fs, com.COM_CUTOFF_HZ)
+    change = np.abs(hanging_index - index)[centre.weight_valid]
+    check("the arms move the weight index little", np.median(change) < 0.05,
+          f"holding them hanging changes it by {np.median(change):.3f} (median), {np.percentile(change, 95):.3f} "
+          "(95th percentile)")
+
+    outside = (index < -0.15) | (index > 1.15)
+    check("leaving steps out keeps the weight index inside 0-1", outside[centre.weight_valid].mean() < 0.01,
+          f"more than 0.15 outside for {outside[centre.feet_apart].mean():.1%} of the time the feet are apart, "
+          f"{outside[centre.weight_valid].mean():.2%} once the {centre.stepping.mean():.0%} of the recording "
+          "spent stepping is left out")
 
 
 def main() -> None:

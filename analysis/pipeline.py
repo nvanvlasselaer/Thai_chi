@@ -6,7 +6,8 @@ role, one for the trained role, or just one of the two
 (:mod:`analysis.recordings`).  Before stage 1 each recording's sensors need
 the names the analysis uses (:mod:`analysis.sensor_names`): read from the labels
 when they spell them, otherwise checked and saved on the dashboard's Pipeline
-page.
+page.  A recording may lack some of the 14 sensors; every stage then runs with
+what it has (:mod:`analysis.coverage`, ``docs/missing_sensors.md``).
 
     1. preprocess   per recording: parse it, run the orientation filter, and write
                     what does not depend on event windows -- the orientation
@@ -53,7 +54,7 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from analysis import config, kinematics_check, recordings, sensor_names, sessions
+from analysis import config, coverage, kinematics_check, recordings, sensor_names, sessions
 from analysis.data_io import (
     TrialData,
     make_sensor_inventory,
@@ -238,6 +239,8 @@ def load(progress: Progress | None = None, selection: Selection | None = None) -
     for label, loaded in trials.items():
         for warning in loaded.kin.calibration.warnings():
             report(f"Warning, {label.lower()}: {warning}")
+        for line in coverage.summary(loaded.kin.sensors):
+            report(f"Note, {label.lower()}: {line}")
     return trials
 
 
@@ -368,6 +371,9 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
                 parts.append(f"{role}: checked and saved")
             else:
                 parts.append(f"{role}: every label spells one of the analysis names")
+            missing = recording.missing_sensors() if not problems else []
+            if missing:
+                parts[-1] += f" (no {', '.join(missing)} sensor: reduced analysis, docs/missing_sensors.md)"
         result["names"] = StageStatus("missing" if unsettled else "done", " · ".join(parts))
 
     states = {role: recording.cache_state() if recording else ("missing", "not found")
@@ -406,6 +412,11 @@ def status(selection: Selection | None = None) -> dict[str, StageStatus]:
         result["metrics"] = StageStatus(
             "stale", "calculated before provenance was recorded, so they cannot be matched to "
                      "the current windows: recalculate to be sure"
+        )
+    elif provenance.get("metrics_version") != config.METRICS_VERSION:
+        result["metrics"] = StageStatus(
+            "stale", f"calculated with metrics version {provenance.get('metrics_version')}, and this code defines "
+                     f"version {config.METRICS_VERSION}: recalculate for the current definitions"
         )
     elif provenance.get("session_digest") != session_digest(session):
         result["metrics"] = StageStatus(
@@ -450,6 +461,8 @@ def main() -> None:
                 state = "sensors to name: " + "; ".join(recording.naming_problems())
             else:
                 state = recording.cache_state()[1]
+                if recording.missing_sensors():
+                    state += f" (no {', '.join(recording.missing_sensors())} sensor)"
             print(f"{recording.name:60} {recording.size / 1e6:6.0f} MB  {state}")
         return
 

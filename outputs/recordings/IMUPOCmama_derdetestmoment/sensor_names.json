@@ -1,0 +1,25 @@
+{
+  "recording": {
+    "file": "IMUPOCmama_derdetestmoment.csv",
+    "id": "IMUPOCmama_derdetestmoment",
+    "size": 143007869,
+    "sha256": "ae05fcc87c9ee3e24b4db3876022f77037fca487130e42c30b48629efea1363c"
+  },
+  "saved_utc": "2026-10-07T17:51:05+00:00",
+  "saved_local": "07 Oct 2026 19:51",
+  "sensors": {
+    "Avanti Sensor 0 (84551)": "lulna",
+    "Avanti Sensor 1 (84494)": "rhand",
+    "Avanti Sensor 2 (84625)": "rhumerus",
+    "Avanti Sensor 3 (84483)": "lhumerus",
+    "Avanti Sensor 4 (84642)": "rulna",
+    "Avanti Sensor 7 (84663)": "chestbone",
+    "Avanti Sensor 8 (84573)": "lumbar",
+    "Avanti Sensor 9 (84570)": "lthigh",
+    "Avanti Sensor 10 (84624)": "rthigh",
+    "Avanti Sensor 11 (84492)": "ltibia",
+    "Avanti Sensor 12 (84607)": "rtibia",
+    "Avanti Sensor 13 (84643)": "lfoot",
+    "Avanti Sensor 14 (84644)": "rfoot"
+  }
+}

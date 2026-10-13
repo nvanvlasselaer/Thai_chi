@@ -14,6 +14,11 @@ its bias still in, because that is what these detectors were designed and run
 on: a v1 session detected today gets exactly the original windows.  The
 metrics computed on those windows are the current ones; the original numbers
 come from the git tag ``metrics-v1``.
+
+The June recordings these were designed on had every sensor.  With some
+missing they do what their sensors allow: no trunk rotations without the
+lumbar and chest sensors, the stabilization search on whichever trunk sensor
+there is, and the DTW matching on the channels both recordings have.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from analysis.signals import highpass_detrend, lowpass_signal
 
 
 def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: int = 3) -> tuple[list[tuple[int, int, int]], str]:
+    if not kin.has("lumbar", "chestbone"):
+        return [], "No v1 trunk rotations: the recording has no trunk-pelvis yaw (lumbar and chest sensors)."
     z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
     z = lowpass_signal(z, fs, cutoff_hz=4.0)
     chest_omega = lowpass_signal(kin.omega_raw_mag["chestbone"], fs, cutoff_hz=6.0)
@@ -75,9 +82,16 @@ def detect_novice_trunk_rotation_events(kin: Kinematics, fs: float, num_events: 
 
 
 def find_stabilization(kin: Kinematics, fs: float, after_end: int) -> tuple[int, int]:
-    lumbar = lowpass_signal(kin.omega_raw_mag["lumbar"], fs, cutoff_hz=4.0)
-    chest = lowpass_signal(kin.omega_raw_mag["chestbone"], fs, cutoff_hz=4.0)
-    combined = lumbar + chest
+    present = [sensor for sensor in ("lumbar", "chestbone") if kin.has(sensor)]
+    if not present:  # no trunk sensor: nothing to search on
+        start = min(after_end, max(0, len(kin.t) - int(2 * fs)))
+        return start, min(start + int(2 * fs), len(kin.t))
+    if len(present) == 2:
+        lumbar = lowpass_signal(kin.omega_raw_mag["lumbar"], fs, cutoff_hz=4.0)
+        chest = lowpass_signal(kin.omega_raw_mag["chestbone"], fs, cutoff_hz=4.0)
+        combined = lumbar + chest
+    else:
+        combined = lowpass_signal(kin.omega_raw_mag[present[0]], fs, cutoff_hz=4.0)
     search_start = after_end
     search_end = min(len(combined), after_end + int(10 * fs))
     threshold = np.percentile(combined[search_start:search_end], 25)
@@ -147,17 +161,36 @@ class SignatureChannels:
     channels: list[np.ndarray] = field(default_factory=list)
 
 
-def precompute_signature_channels(kin: Kinematics, fs: float) -> SignatureChannels:
-    """Filter the seven DTW signature channels once, at the source rate."""
-    raw = [
-        highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05),
-        kin.eulers_deg["lumbar"][:, 0],
-        kin.omega_raw_mag["chestbone"],
-        kin.left_knee_deg[:, 0],
-        kin.right_knee_deg[:, 0],
-        kin.omega_raw_mag["lhand"],
-        kin.omega_raw_mag["rhand"],
-    ]
+SIGNATURE_SENSORS = (
+    ("lumbar", "chestbone"),  # trunk-pelvis yaw
+    ("lumbar",),              # lumbar Euler x
+    ("chestbone",),           # chest angular speed
+    ("lthigh", "ltibia"),     # left knee
+    ("rthigh", "rtibia"),     # right knee
+    ("lhand",),               # left hand angular speed
+    ("rhand",),               # right hand angular speed
+)
+"""The sensors behind each of the seven signature channels, in order."""
+
+
+def signature_channels_for(*kins: Kinematics) -> tuple[int, ...]:
+    """The signature channels every recording can provide: all seven when every sensor is there."""
+    return tuple(i for i, sensors in enumerate(SIGNATURE_SENSORS) if all(kin.has(*sensors) for kin in kins))
+
+
+def precompute_signature_channels(kin: Kinematics, fs: float,
+                                  channels: tuple[int, ...] = tuple(range(len(SIGNATURE_SENSORS)))) -> SignatureChannels:
+    """Filter the DTW signature channels -- normally all seven -- once, at the source rate."""
+    makers = (
+        lambda: highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05),
+        lambda: kin.eulers_deg["lumbar"][:, 0],
+        lambda: kin.omega_raw_mag["chestbone"],
+        lambda: kin.left_knee_deg[:, 0],
+        lambda: kin.right_knee_deg[:, 0],
+        lambda: kin.omega_raw_mag["lhand"],
+        lambda: kin.omega_raw_mag["rhand"],
+    )
+    raw = [makers[i]() for i in channels]
     return SignatureChannels(
         time_s=kin.t,
         channels=[lowpass_signal(channel, fs, cutoff_hz=SIGNATURE_CUTOFF_HZ) for channel in raw],
@@ -233,8 +266,11 @@ def pair_trunk_events_v1(
 
     # Window lengths are carried from one recording to the other in samples,
     # so v1 matches both at one rate (the two are identical in this dataset).
-    novice_signature = precompute_signature_channels(novice_kin, novice_fs)
-    trained_signature = precompute_signature_channels(trained_kin, novice_fs)
+    channels = signature_channels_for(novice_kin, trained_kin)
+    if not channels:  # nothing both recordings measure to match on
+        return windows, dtw_dists
+    novice_signature = precompute_signature_channels(novice_kin, novice_fs, channels)
+    trained_signature = precompute_signature_channels(trained_kin, novice_fs, channels)
 
     last_trained_end = 0
     for novice_start, novice_end, novice_peak in novice_events:

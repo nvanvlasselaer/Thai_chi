@@ -22,6 +22,9 @@ whatever interactive backend is active -- on macOS that one shrinks a figure
 taller than the screen before saving it, so the same analysis wrote a
 different PNG from the command line than from the dashboard.  It also keeps
 pyplot's global state out of the dashboard's worker threads.
+
+A recording without some of the sensors gets a note, in place of each trace it
+cannot provide, naming the missing sensor (:mod:`analysis.coverage`).
 """
 
 from __future__ import annotations
@@ -55,6 +58,22 @@ WINDOWS = {
 
 def _roles(recordings: dict) -> list[str]:
     return [label for label in TRIALS if label in recordings]
+
+
+def _not_recorded(ax, what: str, sensors: tuple[str, ...], present, y: float = 0.5) -> None:
+    """A note where a trace would be, saying which of its sensors the recording lacks."""
+    lacking = [sensor for sensor in sensors if sensor not in set(present)]
+    ax.text(0.5, y, f"{what}: not recorded (no {', '.join(lacking)} sensor)", transform=ax.transAxes,
+            ha="center", va="center", fontsize=9, color="#888888")
+
+
+def _empty_panel(ax, time: np.ndarray, note: str | None = None) -> None:
+    """An axis with nothing to plot: the recording's time span with the usual margins, and no y scale."""
+    margin = 0.05 * float(time[-1] - time[0])
+    ax.set_xlim(float(time[0]) - margin, float(time[-1]) + margin)
+    ax.set_yticks([])
+    if note:
+        ax.text(0.5, 0.5, note, transform=ax.transAxes, ha="center", va="center", fontsize=9, color="#888888")
 
 
 def _comparison(labels: list[str]) -> str:
@@ -152,10 +171,14 @@ def make_trunk_traceability_figure(
     for row, label in enumerate(labels):
         ax, kin, fs = fig.add_subplot(gs[row, 0]), kins[label], fs_of[label]
         t = kin.t
-        z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
-        z = lowpass_signal(z, fs, cutoff_hz=4.0)
-
-        ax.plot(t, z, color="#1f77b4", lw=1.2, label="trunk-pelvis yaw")
+        if kin.has("lumbar", "chestbone"):
+            z = highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05)
+            z = lowpass_signal(z, fs, cutoff_hz=4.0)
+            ax.plot(t, z, color="#1f77b4", lw=1.2, label="trunk-pelvis yaw")
+        else:
+            z = np.full(len(t), np.nan)
+            _not_recorded(ax, "trunk-pelvis yaw", ("lumbar", "chestbone"), kin.sensors)
+            _empty_panel(ax, t)
 
         for i, (event_start, event_end, stab_start, stab_end, peak) in enumerate(windows[label]):
             ax.axvspan(event_start / fs, event_end / fs, color=WINDOWS["movement"][0], alpha=WINDOWS["movement"][1],
@@ -228,27 +251,39 @@ def make_knee_flexion_overview_figure(
         t = kin.t
         lift = signals[label]["lift"]
 
-        lift_ax.plot(t, lift, color="#444444", lw=1.0, label="lift index (+ left foot up)")
+        if lift is not None:
+            lift_ax.plot(t, lift, color="#444444", lw=1.0, label="lift index (+ left foot up)")
+        else:
+            _not_recorded(lift_ax, "lift index", ("lthigh", "rthigh", "ltibia", "rtibia"), kin.sensors)
+            _empty_panel(lift_ax, t)
         lift_ax.axhline(0.0, color="#888888", lw=0.8, ls=":")
         _stance_bands(lift_ax, knee_events[label], 0.25)
         for ev in knee_events[label]:
-            peak = sec_to_idx(ev["peak_time_s"], fs, len(t))
-            lift_ax.scatter([ev["peak_time_s"]], [lift[peak]], s=18, color="#d1495b", zorder=4)
+            if lift is not None and np.isfinite(ev["peak_time_s"]):
+                peak = sec_to_idx(ev["peak_time_s"], fs, len(t))
+                lift_ax.scatter([ev["peak_time_s"]], [lift[peak]], s=18, color="#d1495b", zorder=4)
         lift_ax.set_ylabel(f"{label}\nlift (thigh lengths)")
         lift_ax.grid(True, color="#dddddd", lw=0.6)
         lift_ax.legend(frameon=False, fontsize=8, ncol=3)
 
-        knee_ax.plot(t, np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)), lw=1.0,
-                     color=LEG_COLOURS["Left"], label="left knee flexion")
-        knee_ax.plot(t, np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0)), lw=1.0,
-                     color="#3a86c8", label="right knee flexion")
+        for side, angles, colour in (("left", kin.left_knee_deg, LEG_COLOURS["Left"]),
+                                     ("right", kin.right_knee_deg, "#3a86c8")):
+            if kin.has(f"{side[0]}thigh", f"{side[0]}tibia"):
+                knee_ax.plot(t, np.abs(lowpass_signal(angles[:, 0], fs, cutoff_hz=6.0)), lw=1.0,
+                             color=colour, label=f"{side} knee flexion")
+            else:
+                _not_recorded(knee_ax, f"{side} knee", (f"{side[0]}thigh", f"{side[0]}tibia"), kin.sensors,
+                              y=0.75 if side == "left" else 0.25)
         _stance_bands(knee_ax, knee_events[label], 0.10, with_labels=False)
         knee_ax.set_ylabel("knee (deg)")
         knee_ax.grid(True, color="#dddddd", lw=0.6)
         knee_ax.legend(frameon=False, fontsize=8, ncol=2)
 
-        tilt_ax.plot(t, signals[label]["lumbar_frontal_tilt"], lw=1.0, label="lumbar frontal tilt")
-        tilt_ax.plot(t, signals[label]["lumbar_sagittal_tilt"], lw=1.0, label="lumbar sagittal tilt")
+        if signals[label]["lumbar_frontal_tilt"] is not None:
+            tilt_ax.plot(t, signals[label]["lumbar_frontal_tilt"], lw=1.0, label="lumbar frontal tilt")
+            tilt_ax.plot(t, signals[label]["lumbar_sagittal_tilt"], lw=1.0, label="lumbar sagittal tilt")
+        else:
+            _not_recorded(tilt_ax, "pelvis tilt", ("lumbar",), kin.sensors)
         _stance_bands(tilt_ax, knee_events[label], 0.10, with_labels=False)
         tilt_ax.set_ylabel("pelvis tilt (deg)")
         tilt_ax.set_xlabel("time (s)")
@@ -277,8 +312,13 @@ def make_knee_traceability_figure(
     for row, label in enumerate(labels):
         ax, kin, fs = fig.add_subplot(gs[row, 0]), kins[label], fs_of[label]
         t = kin.t
-        magnitude = np.abs(signals[label]["lift"])
-        ax.plot(t, magnitude, color="#1f77b4", lw=1.2, label="|lift index|")
+        if signals[label]["lift"] is not None:
+            magnitude = np.abs(signals[label]["lift"])
+            ax.plot(t, magnitude, color="#1f77b4", lw=1.2, label="|lift index|")
+        else:
+            magnitude = None
+            _not_recorded(ax, "lift index", ("lthigh", "rthigh", "ltibia", "rtibia"), kin.sensors)
+            _empty_panel(ax, t)
 
         for i, ev in enumerate(knee_events[label]):
             ax.axvspan(ev["window_start_s"], ev["window_end_s"], color=WINDOWS["movement"][0],
@@ -286,9 +326,10 @@ def make_knee_traceability_figure(
             ax.axvspan(ev["stabilization_start_s"], ev["stabilization_end_s"], color=WINDOWS["stabilization"][0],
                        alpha=WINDOWS["stabilization"][1],
                        label="stabilization window: settling after touch-down" if i == 0 else "")
-            peak = sec_to_idx(ev["peak_time_s"], fs, len(t))
-            ax.scatter([ev["peak_time_s"]], [magnitude[peak]], s=30, color="#d1495b", zorder=4,
-                       label="highest lift" if i == 0 else "")
+            if magnitude is not None and np.isfinite(ev["peak_time_s"]):
+                peak = sec_to_idx(ev["peak_time_s"], fs, len(t))
+                ax.scatter([ev["peak_time_s"]], [magnitude[peak]], s=30, color="#d1495b", zorder=4,
+                           label="highest lift" if i == 0 else "")
 
         ax.set_ylabel(f"{label}\nlift (thigh lengths)")
         ax.grid(True, color="#dddddd", lw=0.6)
@@ -343,12 +384,18 @@ def make_sequence_smoothness_figure(
     for row, label in enumerate(trials):
         chest_yaw, pelvis_yaw = signals[label]["chest_yaw"], signals[label]["pelvis_yaw"]
         rate = fs[label]
-        time = np.arange(len(chest_yaw)) / rate
+        time = np.arange(signals[label]["n_samples"]) / rate
         rows = metrics[metrics.trial == label]
 
         ax = fig.add_subplot(gs[row, 0])
-        ax.plot(time, chest_yaw, color="#1f77b4", lw=1.1, label="chest yaw")
-        ax.plot(time, pelvis_yaw, color="#8ecae6", lw=1.0, label="pelvis yaw")
+        for values, name, sensor, colour, width, y in ((chest_yaw, "chest yaw", "chestbone", "#1f77b4", 1.1, 0.92),
+                                                       (pelvis_yaw, "pelvis yaw", "lumbar", "#8ecae6", 1.0, 0.08)):
+            if values is not None:
+                ax.plot(time, values, color=colour, lw=width, label=name)
+            else:
+                _not_recorded(ax, name, (sensor,), signals[label]["sensors"], y=y)
+        if chest_yaw is None and pelvis_yaw is None:
+            _empty_panel(ax, time)
         ax.axhline(0.0, color="#888888", lw=0.8, ls=":")
         # Turns abut, so a single shade would read as one long block; the
         # alternating alpha is what makes the individual turns countable.
@@ -372,6 +419,9 @@ def make_sequence_smoothness_figure(
             ax.set_title(f"turn time course, {corridor.get('n', 0)} turns\n"
                          "(the form's turns differ; not repetition variability)", fontsize=9)
             ax.legend(loc="lower right", fontsize=8, frameon=False)
+        elif chest_yaw is None:
+            ax.text(0.5, 0.5, "turn time course:\nnot recorded (no chestbone sensor)", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=9, color="#888888")
         ax.set_ylabel("fraction of turn")
         ax.grid(True, color="#dddddd", lw=0.6)
 
@@ -397,6 +447,122 @@ def make_sequence_smoothness_figure(
 
 
 # ---------------------------------------------------------------------------
+# Centre of mass
+# ---------------------------------------------------------------------------
+
+
+FAMILY_BANDS = {
+    # family: its band colour and opacity, a darker shade for text on it, and its name
+    "trunk": ("#f2b134", 0.30, "#8a5a00", "trunk rotation"),
+    "knee": ("#8ecae6", 0.45, "#1d5f80", "single-leg support"),
+    "smooth": ("#b8b8b8", 0.22, "#4a4a4a", "turn"),
+}
+
+
+def make_centre_of_mass_figure(
+    signals: dict[str, dict],
+    fs_of: dict[str, float],
+    frames: dict[str, pd.DataFrame],
+    spans: dict[str, dict[str, list[tuple[float, float]]]],
+    sources: dict[str, str],
+    out_dir: Path,
+) -> None:
+    """The centre of mass's height and the weight index, with every family's windows, above the paired metrics.
+
+    ``frames`` holds each family's metric table and ``spans`` each recording's
+    movement windows per family, in seconds.  The turns tile the form, so they
+    are drawn as alternating light bands under the others.  Where a foot is
+    stepping, or the feet are closer together than the hip joints, the weight
+    index does not measure the weight, and it is drawn faint there.
+    """
+    labels = _roles(signals)
+    fig = Figure(figsize=(13, 4.1 * len(labels) + 2.6), constrained_layout=True)
+    gs = fig.add_gridspec(2 * len(labels) + 1, 1, height_ratios=[0.95, 0.95] * len(labels) + [1.35])
+
+    for row, label in enumerate(labels):
+        height_ax = fig.add_subplot(gs[2 * row, 0])
+        index_ax = fig.add_subplot(gs[2 * row + 1, 0], sharex=height_ax)
+        sig, fs = signals[label], fs_of[label]
+        t = np.arange(sig["n_samples"]) / fs
+        for ax in (height_ax, index_ax):
+            for i, (start, end) in enumerate(spans[label].get("smooth", [])):
+                colour, alpha, _, name = FAMILY_BANDS["smooth"]
+                ax.axvspan(start, end, color=colour, alpha=alpha if i % 2 else 0.5 * alpha, lw=0,
+                           label=name if i == 0 and ax is height_ax else "")
+            for family in ("trunk", "knee"):
+                colour, alpha, _, name = FAMILY_BANDS[family]
+                for i, (start, end) in enumerate(spans[label].get(family, [])):
+                    ax.axvspan(start, end, color=colour, alpha=alpha, lw=0,
+                               label=name if i == 0 and ax is height_ax else "")
+            ax.grid(True, color="#dddddd", lw=0.6)
+
+        if sig["com_height"] is not None:
+            height_ax.plot(t, 100.0 * (sig["com_height"] - sig["com_neutral_height"]), color="#1f77b4", lw=1.1,
+                           label="centre of mass height")
+        else:
+            _empty_panel(height_ax, t, "centre of mass height: not calculated with this recording's sensors "
+                                       "(sensor_coverage.csv)")
+        height_ax.axhline(0.0, color="#888888", lw=0.8, ls=":")
+        height_ax.set_ylabel(f"{label}\nheight from neutral\n(% of body height)")
+        height_ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), fontsize=8, frameon=False, ncol=4,
+                         borderaxespad=0.2)
+
+        index, valid = sig["weight_index"], sig["weight_valid"]
+        if index is not None:
+            index_ax.plot(t, np.where(valid, index, np.nan), color="#d1495b", lw=1.1,
+                          label="weight index, both feet down")
+            index_ax.plot(t, np.where(valid, np.nan, index), color="#d1495b", lw=0.8, alpha=0.25,
+                          label="a foot stepping, or the feet together: not a weight share")
+        else:
+            index_ax.text(0.5, 0.5, "weight index: not calculated with this recording's sensors "
+                                    "(sensor_coverage.csv)", transform=index_ax.transAxes, ha="center",
+                          va="center", fontsize=9, color="#888888")
+        for level in (0.0, 1.0):
+            index_ax.axhline(level, color="#888888", lw=0.8, ls=":")
+        index_ax.set_ylim(-0.3, 1.3)
+        index_ax.set_yticks([0.0, 0.5, 1.0])
+        index_ax.set_yticklabels(["0 left", "0.5", "1 right"])
+        index_ax.set_ylabel("weight index\n(foot under the\ncentre of mass)")
+        if index is not None:
+            index_ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), fontsize=8, frameon=False, ncol=2,
+                            borderaxespad=0.2)
+    index_ax.set_xlabel("time (s)")
+
+    groups = [
+        ("trunk", "Trunk rotation: over the rotation", [
+            ("com_weight_transfer", "weight transfer", ""),
+            ("com_height_range_pct_height", "height range (% H)", ""),
+            ("com_lowering_pct_height", "below neutral (% H)", ""),
+        ]),
+        ("knee", "Single-leg stance: over the support", [
+            ("support_com_height_range_pct_height", "height range (% H)", ""),
+            ("support_com_lowering_pct_height", "below neutral (% H)", ""),
+        ]),
+        ("smooth", "Turns of the form", [
+            ("com_weight_transfer", "weight transfer", ""),
+            ("com_height_range_pct_height", "height range (% H)", ""),
+            ("com_lowering_pct_height", "below neutral (% H)", ""),
+        ]),
+    ]
+    groups = [group for group in groups if len(frames.get(group[0], pd.DataFrame()))]
+    if groups:
+        blocks = fig.add_subfigure(gs[2 * len(labels), 0]).subfigures(
+            1, len(groups), width_ratios=[len(panels) for _, _, panels in groups], wspace=0.02)
+        for block, (family, header, panels) in zip(np.atleast_1d(blocks), groups):
+            colour, alpha, text, _ = FAMILY_BANDS[family]
+            block.set_facecolor(to_rgba(colour, alpha))
+            block.suptitle(header, fontsize=10, fontweight="bold", color=text)
+            for ax, (name, title, note) in zip(np.atleast_1d(block.subplots(1, len(panels))), panels):
+                ax.set_facecolor("white")
+                _paired_panel(ax, frames[family], name, title, labels, note)
+
+    fig.suptitle(f"Centre of Mass: Weight Transfer, Height and Depth, {_comparison(labels)} Tai Chi",
+                 fontsize=14, fontweight="bold")
+    _sources(fig, sources)
+    fig.savefig(out_dir / "centre_of_mass_figure.png", dpi=220)
+
+
+# ---------------------------------------------------------------------------
 # Orientation
 # ---------------------------------------------------------------------------
 
@@ -406,6 +572,11 @@ def make_orientation_validation_figure(kin: Kinematics, fs: float, source: str, 
     fig = Figure(figsize=(11, 3.8), constrained_layout=True)
     axes = fig.subplots(1, 2, sharex=False)
     for ax, sensor in zip(axes, ["lumbar", "chestbone"]):
+        if not kin.has(sensor):
+            ax.set_title(f"{sensor} orientation")
+            _not_recorded(ax, f"{sensor} orientation", (sensor,), kin.sensors)
+            ax.set_xlabel("time (s)")
+            continue
         target_time, x = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 0], fs, 10.0)
         _, y = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 1], fs, 10.0)
         _, z = resample_filtered_full(kin.t, kin.eulers_deg[sensor][:, 2], fs, 10.0)

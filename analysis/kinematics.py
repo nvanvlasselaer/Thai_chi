@@ -76,6 +76,10 @@ class Kinematics:
 
     The body frame is x = mediolateral (the flexion/extension axis), y =
     anteroposterior, z = vertical: see :func:`analysis.orientation.mounting_matrix`.
+
+    A recording without some of the sensors has no entry for them in the
+    per-sensor dicts, and NaN in every relative angle that needs them
+    (:mod:`analysis.coverage`); :meth:`has` says which are there.
     """
 
     t: np.ndarray
@@ -95,6 +99,15 @@ class Kinematics:
     right_elbow_deg: np.ndarray
     left_hip_deg: np.ndarray
     right_hip_deg: np.ndarray
+
+    @property
+    def sensors(self) -> frozenset[str]:
+        """The sensors this recording has."""
+        return frozenset(self.quaternions)
+
+    def has(self, *sensors: str) -> bool:
+        """Whether the recording has every one of ``sensors``."""
+        return all(sensor in self.quaternions for sensor in sensors)
 
 
 # Joint angles are relative orientations between a proximal and a distal sensor.
@@ -127,7 +140,12 @@ def find_neutral_pose_window(trial: TrialData, min_duration_s: float = 2.0) -> t
     sensor.  The search starts after the first peak in lumbar acceleration and
     looks for a window with minimal lumbar angular velocity.  If no suitable
     window is found, the function returns the full signal range.
+
+    Without a lumbar sensor the same search runs on every other sensor
+    together (:func:`neutral_pose_window_without_lumbar`).
     """
+    if "lumbar" not in trial.data:
+        return neutral_pose_window_without_lumbar(trial, min_duration_s)
     lumbar_acc_x = trial.data["lumbar"]["acc_x_g"].to_numpy()
     lumbar_gyro = trial.data["lumbar"][GYRO_COLUMNS].to_numpy()
     lumbar_omega = np.linalg.norm(lumbar_gyro, axis=1)
@@ -153,6 +171,39 @@ def find_neutral_pose_window(trial: TrialData, min_duration_s: float = 2.0) -> t
     best_start = best_end - window_size + 1
 
     return best_start, best_end
+
+
+def neutral_pose_window_without_lumbar(trial: TrialData, min_duration_s: float = 2.0) -> tuple[int, int]:
+    """The neutral-pose window of a recording that has no lumbar sensor.
+
+    The search of :func:`find_neutral_pose_window` on every sensor together:
+    the sync movement is the largest summed |acceleration - 1 g| in the first
+    10 s, and the neutral pose the stillest ``min_duration_s`` of the summed
+    angular speed within 15 s after it.  On the lumbar sensor alone this finds
+    the lumbar search's window exactly, in both June recordings.  On the other
+    sensors it lands on another still moment, 2-8 s away, where the arms are
+    held a little differently: the lift index and the chest's turning stay
+    within 0.05 of their tolerance, but the knee's zero moves (peak knee
+    flexion by up to 8 deg), so peak knee flexion is not reported without the
+    lumbar sensor (:data:`analysis.coverage.NEUTRAL_POSE`).
+    """
+    fs = trial.fs
+    n = min(len(trial.data[sensor]) for sensor in trial.sensors)
+    deviation = sum(np.abs(np.linalg.norm(trial.data[sensor][ACC_COLUMNS].to_numpy()[:n], axis=1) - 1.0)
+                    for sensor in trial.sensors)
+    omega = sum(np.linalg.norm(trial.data[sensor][GYRO_COLUMNS].to_numpy()[:n], axis=1) for sensor in trial.sensors)
+
+    search_window = min(int(10 * fs), n)
+    peak_idx = int(np.nanargmax(deviation[:search_window]))
+    start_search = peak_idx + int(0.5 * fs)
+    window_size = int(fs * min_duration_s)
+    if start_search + window_size >= n:
+        return 0, n
+
+    search_end = min(n, start_search + int(15 * fs))
+    rolling_mean_omega = pd.Series(omega[start_search:search_end]).rolling(window_size).mean().to_numpy()
+    best_end = start_search + int(np.nanargmin(rolling_mean_omega))
+    return best_end - window_size + 1, best_end
 
 
 QUIET_SPAN_S = 10.0
@@ -280,7 +331,9 @@ def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None
 
 
 def relative_euler(quats: dict[str, np.ndarray], proximal: str, distal: str) -> np.ndarray:
-    """Euler angles of the distal segment expressed in the proximal frame."""
+    """Euler angles of the distal segment expressed in the proximal frame; NaN if either sensor is missing."""
+    if proximal not in quats or distal not in quats:
+        return np.full((len(next(iter(quats.values()))), 3), np.nan)
     return quat_to_euler_deg(quat_multiply(quat_inverse(quats[proximal]), quats[distal]))
 
 

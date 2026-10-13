@@ -86,12 +86,19 @@ def _series(values: np.ndarray) -> list[float]:
 
 
 def build_display(loaded: LoadedTrial) -> dict:
-    """Resample every plotted channel to 50 Hz once, at startup."""
+    """Resample every plotted channel to 50 Hz once, at startup.
+
+    A channel the recording's sensors cannot provide is an empty list, and
+    ``row_notes`` says per row what is not recorded (:mod:`analysis.coverage`).
+    """
     kin, fs = loaded.kin, loaded.fs
 
     def resample(signal: np.ndarray) -> np.ndarray:
         _, values = resample_filtered_full(kin.t, signal, fs, DISPLAY_FS)
         return values
+
+    def series(signal: np.ndarray | None, available: bool = True) -> list[float]:
+        return _series(resample(signal)) if available and signal is not None else []
 
     time_s, _ = resample_filtered_full(kin.t, kin.t, fs, DISPLAY_FS)
 
@@ -100,41 +107,66 @@ def build_display(loaded: LoadedTrial) -> dict:
     segment_diag = detection.chest_yaw_signals(kin, fs)
     lift_diag = detection.lift_signal(kin, fs)
 
+    def knee(angles: np.ndarray, side: str) -> list[float]:
+        return series(np.abs(lowpass_signal(angles[:, 0], fs, cutoff_hz=6.0)), kin.has(f"{side}thigh", f"{side}tibia"))
+
     return {
         "time": _series(time_s),
-        "chest_yaw": _series(resample(segment_diag.chest_yaw_deg)),
-        "pelvis_yaw": _series(resample(segment_diag.pelvis_yaw_deg)),
-        "yaw": _series(resample(trunk_diag.yaw_deg)),
-        "envelope": _series(resample(trunk_diag.envelope_dps)),
+        "chest_yaw": series(segment_diag.chest_yaw_deg, kin.has("chestbone")),
+        "pelvis_yaw": series(segment_diag.pelvis_yaw_deg, kin.has("lumbar")),
+        "yaw": series(trunk_diag.yaw_deg, trunk_diag.available),
+        "envelope": series(trunk_diag.envelope_dps, trunk_diag.available),
         "envelope_floor": float(trunk_diag.floor_dps),
         "envelope_peak_height": float(trunk_diag.peak_height_dps),
-        "lumbar_omega": _series(resample(kin.omega_mag["lumbar"])),
-        "chest_omega": _series(resample(kin.omega_mag["chestbone"])),
-        "combined_omega": _series(resample(stab_diag.combined_omega_dps)),
+        "lumbar_omega": series(kin.omega_mag.get("lumbar")),
+        "chest_omega": series(kin.omega_mag.get("chestbone")),
+        "combined_omega": series(stab_diag.combined_omega_dps, bool(stab_diag.sensors)),
         "omega_baseline": float(stab_diag.baseline_dps),
         "omega_median": float(stab_diag.baseline_dps + stab_diag.scale_dps),
-        "lift": _series(resample(lift_diag.lift_index)),
-        "left_knee": _series(resample(np.abs(lowpass_signal(kin.left_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
-        "right_knee": _series(resample(np.abs(lowpass_signal(kin.right_knee_deg[:, 0], fs, cutoff_hz=6.0)))),
+        "lift": series(lift_diag.lift_index, lift_diag.available),
+        "left_knee": knee(kin.left_knee_deg, "l"),
+        "right_knee": knee(kin.right_knee_deg, "r"),
         "duration_s": loaded.duration_s,
+        "row_notes": row_notes(kin, stab_diag, lift_diag),
     }
+
+
+def row_notes(kin, stab_diag: detection.StabilizationDiagnostics, lift_diag: detection.LiftDiagnostics) -> list[str]:
+    """Per row of the editor, what this recording's sensors leave out or stand in for; empty when nothing."""
+    def lacking(*sensors: str) -> str:
+        gone = [sensor for sensor in sensors if not kin.has(sensor)]
+        return f"not recorded (no {', '.join(gone)} sensor)" if gone else ""
+
+    stab = ("" if stab_diag.complete else
+            f"{stab_diag.sensors[0]} alone places the stabilization windows (no "
+            f"{'chestbone' if stab_diag.sensors[0] == 'lumbar' else 'lumbar'} sensor)" if stab_diag.sensors else
+            "no trunk sensor: no stabilization search")
+    lift = (lacking("lthigh", "rthigh") if not lift_diag.available else
+            "the thigh stands in for the missing " + " and ".join(lift_diag.stand_ins) if lift_diag.stand_ins else "")
+    knees = "; ".join(note for note in (
+        lacking("lthigh", "ltibia") and "left " + lacking("lthigh", "ltibia"),
+        lacking("rthigh", "rtibia") and "right " + lacking("rthigh", "rtibia")) if note)
+    yaw = "; ".join(note for note in (lacking("chestbone") and "chest " + lacking("chestbone"),
+                                      lacking("lumbar") and "pelvis " + lacking("lumbar")) if note)
+    return [lacking("lumbar", "chestbone"), lacking("lumbar", "chestbone"), stab, lift, knees, yaw]
 
 
 def base_figure(label: str, display: dict) -> go.Figure:
     """Four linked-x subplots for one recording."""
+    notes = display.get("row_notes") or [""] * N_ROWS
     figure = make_subplots(
         rows=N_ROWS,
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.035,
-        subplot_titles=ROW_TITLES,
+        subplot_titles=[f"{title}  —  {note}" if note else title for title, note in zip(ROW_TITLES, notes)],
     )
     time = display["time"]
 
     def add(y, name, row, colour, width=1.1, dash=None):
         figure.add_trace(
             go.Scattergl(
-                x=time, y=y, name=name, mode="lines",
+                x=time if len(y) else [], y=y, name=name, mode="lines",
                 line={"width": width, "color": colour, "dash": dash},
                 hovertemplate="%{x:.2f}s  %{y:.2f}<extra>" + name + "</extra>",
             ),
@@ -216,8 +248,11 @@ def _threshold_line(y: float, row: int, colour: str, dash: str) -> dict:
 
 def threshold_lines(display: dict, knee_threshold: float, min_lobe_deg: float,
                     lift_min_peak: float) -> list[dict]:
-    """The thresholds the detectors used, so a boundary stays explainable."""
-    return [
+    """The thresholds the detectors used, so a boundary stays explainable.
+
+    A threshold the recording's sensors give no value for (NaN) is left out.
+    """
+    lines = [
         _threshold_line(display["envelope_floor"], 2, "#7b4173", "dot"),
         _threshold_line(display["omega_baseline"], 3, "#264653", "dot"),
         _threshold_line(display["omega_median"], 3, "#264653", "dash"),
@@ -229,6 +264,7 @@ def threshold_lines(display: dict, knee_threshold: float, min_lobe_deg: float,
         _threshold_line(min_lobe_deg, 6, "#444444", "dash"),
         _threshold_line(-min_lobe_deg, 6, "#444444", "dash"),
     ]
+    return [line for line in lines if np.isfinite(line["y0"])]
 
 
 def _partner_outline(x0: float, x1: float, same_movement: bool) -> dict:
@@ -412,11 +448,13 @@ def event_table_rows(session: dict, family: str, trials: dict[str, LoadedTrial],
 
 
 def event_flags(event: dict, overlap: tuple[float, float] | None, low_confidence_z: float) -> str:
-    """Short markers: edited, mismatched pair, low-confidence stabilization."""
+    """Short markers: edited, carried over from the other recording, mismatched pair, low-confidence stabilization."""
     windows = event["windows"].values() if "windows" in event else [event]
     flags = []
     if any("manual" in (w.get("source") or {}).values() for w in windows):
         flags.append("edited")
+    if any((w.get("source") or {}).get("event") == sessions.CARRIED_OVER for w in windows):
+        flags.append("carried over")
     if overlap is not None and overlap[0] < MIN_PAIR_OVERLAP:
         flags.append("confirmed" if event.get("pair_confirmed") else "mismatch")
     scores = [w.get("stab_quiet_z") for w in windows]
@@ -563,6 +601,7 @@ def layout() -> html.Div:
             style_header={"fontWeight": "bold", "backgroundColor": "#f0f0f0"},
             style_data_conditional=[
                 {"if": {"filter_query": '{flags} contains "unsettled"'}, "backgroundColor": "#fff4e0"},
+                {"if": {"filter_query": '{flags} contains "carried over"'}, "backgroundColor": "#eef4fb"},
                 {"if": {"filter_query": '{flags} contains "mismatch"'}, "backgroundColor": "#fde2e0"},
                 {"if": {"filter_query": '{flags} contains "off"'}, "color": "#aaa"},
             ],
@@ -1194,6 +1233,7 @@ def register_callbacks(app: Dash) -> None:
                 "monopodal_stance_traceability_figure.png",
                 "monopodal_stance_overview_figure.png",
                 "sequence_smoothness_figure.png",
+                "centre_of_mass_figure.png",
             )
         ]
         message = "Wrote:\n  " + "\n  ".join(result.written) + "\n\n" + "\n".join(result.log)

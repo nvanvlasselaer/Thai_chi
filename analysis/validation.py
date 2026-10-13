@@ -5,7 +5,9 @@ too short for the metric code to handle; a pair whose two windows are not the
 same movement of the form; a stance labelled with the leg that stayed down.
 Warnings are shown in the editor and leave the call to the user: a
 stabilization window the participant had not settled in, a pair whose windows
-cover the same movement but with quite different boundaries.
+cover the same movement but with quite different boundaries, a window carried
+over from the other recording because this one lacks a sensor its detector
+needs.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import numpy as np
 from analysis import alignment, detection
 from analysis.config import TRIALS
 from analysis.kinematics import LoadedTrial
-from analysis.sessions import FAMILIES, FAMILY_KEY
+from analysis.sessions import CARRIED_OVER, FAMILIES, FAMILY_KEY
 from analysis.signals import LAG_MIN_OVERLAP, LAG_SEARCH_S
 
 
@@ -89,6 +91,10 @@ def validate_window(event_id: str, trial: str, window: dict, fs: float, n_sample
             f"the coordination-lag window is {lag_window_s:.2f} s; the +/-{LAG_SEARCH_S:.0f} s search "
             f"needs at least {LAG_WINDOW_MIN_S:.0f} s and may return no lag"
         )
+    if (window.get("source") or {}).get("event") == CARRIED_OVER:
+        warn(f"carried over from the {str(window.get('carried_from', 'other')).lower()} recording through the "
+             "alignment (this one lacks a sensor the detector needs): check the boundaries against this "
+             "recording's own signals")
     if has_stab:
         if stab_start < end:
             warn("stabilization overlaps the event")
@@ -179,21 +185,28 @@ def check_pairing(events: list[dict], trials: dict[str, LoadedTrial], lenient: b
     return issues
 
 
-_lift_cache: dict[str, np.ndarray] = {}
+_lift_cache: dict[tuple, np.ndarray | None] = {}
 
 
-def lift_index_of(loaded: LoadedTrial) -> np.ndarray:
-    """The recording's lift index, computed once per file: validation runs on every edit."""
-    key = loaded.recording.sha256()
+def lift_index_of(loaded: LoadedTrial) -> np.ndarray | None:
+    """The recording's lift index, computed once per file and set of sensors: validation runs on every edit.
+
+    None without a thigh sensor; with a shank missing, its thigh stands in
+    (:func:`analysis.detection.lift_signal`), which is enough to tell which
+    foot is the higher one.
+    """
+    key = (loaded.recording.sha256(), tuple(sorted(loaded.kin.sensors)))
     if key not in _lift_cache:
-        _lift_cache[key] = detection.lift_signal(loaded.kin, loaded.fs).lift_index
+        diagnostics = detection.lift_signal(loaded.kin, loaded.fs)
+        _lift_cache[key] = diagnostics.lift_index if diagnostics.available else None
     return _lift_cache[key]
 
 
 def check_leg_side(events: list[dict], trials: dict[str, LoadedTrial]) -> list[Issue]:
     """Flag a stance whose labelled lifted leg is the lower foot in the window."""
     issues: list[Issue] = []
-    lift = {label: lift_index_of(loaded) for label, loaded in trials.items()}
+    lift = {label: index for label, index in ((label, lift_index_of(loaded)) for label, loaded in trials.items())
+            if index is not None}
     for event in events:
         leg = event.get("lifted_leg")
         for label, window in event.get("windows", {}).items():

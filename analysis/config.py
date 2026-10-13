@@ -39,7 +39,7 @@ IGNORE_HIGH_PASS_FILTER = False
 # kept so the committed results stay reproducible.
 DETECTOR = "v2"
 
-METRICS_VERSION = 2
+METRICS_VERSION = 3
 """Which definition of the metrics produced the numbers, stamped into every
 session save, every metric CSV and metrics_provenance.json.
 
@@ -53,6 +53,10 @@ session save, every metric CSV and metrics_provenance.json.
    axes named correctly (x = mediolateral, y = anteroposterior), gyroscope bias
    removed, single-leg stance from leg geometry, single-direction turns, and
    every family paired through a whole-recording alignment.
+3. Adds the centre of mass to the movement window of every family
+   (:mod:`analysis.com`): the weight transferred between the feet, and how
+   far the centre of mass rose and sank and sat below upright standing.  Every
+   column of version 2 is unchanged.
 """
 
 # Body segment each sensor is strapped to.  Placement is described in

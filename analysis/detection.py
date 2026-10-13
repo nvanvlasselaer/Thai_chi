@@ -47,6 +47,7 @@ import pandas as pd
 from scipy.signal import find_peaks
 
 from analysis.alignment import Alignment, match_windows
+from analysis.coverage import stabilization_sensors
 from analysis.gravity import leg_lift_index
 from analysis.kinematics import Kinematics
 from analysis.signals import extract_contiguous_runs, highpass_detrend, lowpass_signal
@@ -198,6 +199,8 @@ class TrunkDiagnostics:
     envelope_dps: np.ndarray
     floor_dps: float
     peak_height_dps: float
+    available: bool = True
+    """False without the lumbar or the chest sensor: no trunk-pelvis yaw, all of it NaN."""
 
 
 @dataclass
@@ -211,7 +214,7 @@ class StabilizationResult:
     quiet_z: float
     """``(window mean - baseline) / spread``: 0 = the recording's quietest fifth, 1 = its median."""
     status: str
-    """``"ok"``, ``"low-confidence"`` or ``"out-of-range"``."""
+    """``"ok"``, ``"low-confidence"``, ``"out-of-range"``, or ``"no-signal"`` without either trunk sensor."""
 
     @property
     def low_confidence(self) -> bool:
@@ -226,9 +229,16 @@ class StabilizationDiagnostics:
     baseline_dps: float
     scale_dps: float
     """Median minus baseline: the spread quietness is measured in."""
+    sensors: tuple[str, ...] = ("lumbar", "chestbone")
+    """The trunk sensors summed: both normally, one if the other is missing, none without either."""
 
     def quiet_z(self, mean_dps: float) -> float:
         return float((mean_dps - self.baseline_dps) / max(self.scale_dps, 1e-9))
+
+    @property
+    def complete(self) -> bool:
+        """Both trunk sensors: the quietness score is the one the metrics report."""
+        return len(self.sensors) == 2
 
 
 @dataclass
@@ -239,6 +249,8 @@ class SegmentDiagnostics:
     pelvis_yaw_deg: np.ndarray
     smoothed_yaw_deg: np.ndarray
     min_lobe_deg: float
+    available: bool = True
+    """False without the chest sensor: no turns can be found (the chest yaw is NaN)."""
 
 
 @dataclass
@@ -250,6 +262,10 @@ class LiftDiagnostics:
     floor: float
     """The double-support level of |lift index|: no boundary is placed below it."""
     min_peak: float
+    available: bool = True
+    """False without a thigh sensor: no stances can be found (the index is NaN)."""
+    stand_ins: tuple[str, ...] = ()
+    """Shanks whose tilt was taken from their thigh (:func:`analysis.coverage.lift_stand_ins`)."""
 
 
 @dataclass
@@ -278,6 +294,10 @@ def trunk_yaw_envelope(
     detector.
     """
     params = params or TrunkDetectorParams()
+    if not kin.has("lumbar", "chestbone"):
+        empty = np.full(len(kin.t), np.nan)
+        return TrunkDiagnostics(yaw_deg=empty, envelope_dps=empty.copy(), floor_dps=float("nan"),
+                                peak_height_dps=float("nan"), available=False)
 
     yaw = lowpass_signal(
         highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs, cutoff_hz=0.05),
@@ -310,6 +330,8 @@ def trunk_rotation_candidates(
     """
     params = params or TrunkDetectorParams()
     diagnostics = trunk_yaw_envelope(kin, fs, params)
+    if not diagnostics.available:
+        return [], diagnostics
     yaw, envelope = diagnostics.yaw_deg, diagnostics.envelope_dps
 
     peaks, _ = find_peaks(
@@ -435,11 +457,20 @@ def lift_signal(kin: Kinematics, fs: float, params: KneeDetectorParams | None = 
     The floor is the recording's median |lift index|: most of any Tai Chi
     recording is spent with both feet down, so the median is the double-support
     level (0.03 thigh lengths here), and no boundary is walked below it.
+
+    A missing shank's tilt is taken from its thigh here, which places the
+    windows as well as the measured index does; without a thigh the index is
+    NaN and no stance is found (:func:`analysis.coverage.lift_stand_ins`).
     """
     params = params or KneeDetectorParams()
-    lift = lowpass_signal(leg_lift_index(kin), fs, cutoff_hz=LIFT_CUTOFF_HZ)
+    index = leg_lift_index(kin, stand_in=True)
+    if index is None:
+        return LiftDiagnostics(lift_index=np.full(len(kin.t), np.nan), floor=float("nan"),
+                               min_peak=float(params.lift_min_peak), available=False)
+    lift = lowpass_signal(index, fs, cutoff_hz=LIFT_CUTOFF_HZ)
     return LiftDiagnostics(lift_index=lift, floor=float(np.median(np.abs(lift))),
-                           min_peak=float(params.lift_min_peak))
+                           min_peak=float(params.lift_min_peak),
+                           stand_ins=tuple(s for s in ("ltibia", "rtibia") if not kin.has(s)))
 
 
 def find_single_leg_phases(
@@ -457,6 +488,8 @@ def find_single_leg_phases(
     """
     params = params or KneeDetectorParams()
     diagnostics = diagnostics or lift_signal(kin, fs, params)
+    if not diagnostics.available:
+        return []
     lift = diagnostics.lift_index
     magnitude = np.abs(lift)
     peaks, _ = find_peaks(magnitude, height=params.lift_min_peak, distance=max(1, int(2.0 * fs)))
@@ -503,14 +536,19 @@ def chest_yaw_signals(
     """
     params = params or SegmentDetectorParams()
 
-    chest = highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05)
-    pelvis = highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05)
+    def yaw(sensor: str) -> np.ndarray:
+        if not kin.has(sensor):
+            return np.full(len(kin.t), np.nan)
+        return highpass_detrend(kin.eulers_deg[sensor][:, 2], fs, cutoff_hz=0.05)
 
+    chest, pelvis = yaw("chestbone"), yaw("lumbar")
+    available = kin.has("chestbone")
     return SegmentDiagnostics(
         chest_yaw_deg=chest,
         pelvis_yaw_deg=pelvis,
-        smoothed_yaw_deg=lowpass_signal(chest, fs, cutoff_hz=params.yaw_cutoff_hz),
+        smoothed_yaw_deg=lowpass_signal(chest, fs, cutoff_hz=params.yaw_cutoff_hz) if available else chest.copy(),
         min_lobe_deg=float(params.min_lobe_deg),
+        available=available,
     )
 
 
@@ -552,6 +590,8 @@ def yaw_turning_points(
     """The chest yaw's turning points as ``(index, direction)``, and the signals behind them."""
     params = params or SegmentDetectorParams()
     diagnostics = chest_yaw_signals(kin, fs, params)
+    if not diagnostics.available:
+        return [], diagnostics
     return _turning_points(diagnostics.smoothed_yaw_deg, fs, params), diagnostics
 
 
@@ -597,17 +637,28 @@ def combined_omega(
     """Return the lumbar+chest angular-velocity signal and its quiet baseline.
 
     This is the quantity the stabilization search minimises, so plotting it with
-    the baseline makes the choice of window inspectable.
+    the baseline makes the choice of window inspectable.  Without one of the
+    two trunk sensors it is the other's alone, which places 95 % of the windows
+    within 0.25 s of the two-sensor search; without either there is no signal
+    (:func:`analysis.coverage.stabilization_sensors`).
     """
     params = params or StabilizationParams()
-    combined = lowpass_signal(
-        kin.omega_mag["lumbar"], fs, cutoff_hz=params.omega_cutoff_hz
-    ) + lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=params.omega_cutoff_hz)
+    sensors = stabilization_sensors(kin.sensors)
+    if not sensors:
+        return StabilizationDiagnostics(combined_omega_dps=np.full(len(kin.t), np.nan), baseline_dps=float("nan"),
+                                        scale_dps=float("nan"), sensors=())
+    if len(sensors) == 2:
+        combined = lowpass_signal(
+            kin.omega_mag["lumbar"], fs, cutoff_hz=params.omega_cutoff_hz
+        ) + lowpass_signal(kin.omega_mag["chestbone"], fs, cutoff_hz=params.omega_cutoff_hz)
+    else:
+        combined = lowpass_signal(kin.omega_mag[sensors[0]], fs, cutoff_hz=params.omega_cutoff_hz)
     baseline, middle = np.percentile(combined, [params.baseline_percentile, params.scale_percentile])
     return StabilizationDiagnostics(
         combined_omega_dps=combined,
         baseline_dps=float(baseline),
         scale_dps=float(middle - baseline),
+        sensors=sensors,
     )
 
 
@@ -637,9 +688,12 @@ def find_stabilization(
     params = params or StabilizationParams()
     diagnostics = diagnostics or combined_omega(kin, fs, params)
     combined = diagnostics.combined_omega_dps
-    baseline = max(diagnostics.baseline_dps, 1e-9)
 
     need = max(1, int(params.min_duration_s * fs))
+    if not diagnostics.sensors:  # no trunk sensor: nothing to search on
+        start = min(int(after_end), max(0, len(combined) - need))
+        return StabilizationResult(start, min(start + need, len(combined)), float("nan"), float("nan"), "no-signal")
+    baseline = max(diagnostics.baseline_dps, 1e-9)
     search_start = int(after_end)
     search_end = min(len(combined), search_start + int(params.horizon_s * fs))
 

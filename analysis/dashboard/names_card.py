@@ -12,6 +12,9 @@ Beside the table, the neutral pose seen from the front shows which label each
 spot on the body has been given, so a spot with no sensor, or with two, stands
 out before anything is computed.  Whether the sensors really were on those
 segments shows once they move, on the Kinematics check page.
+
+A spot with no sensor does not stop the analysis: the card says what running
+without it leaves out (:func:`analysis.coverage.summary`).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dash_table, dcc, html
 from dash.exceptions import PreventUpdate
 
-from analysis import recordings, sensor_names
+from analysis import coverage, recordings, sensor_names
 from analysis.config import SENSOR_MAP
 from analysis.dashboard.state import jobs
 from analysis.skeleton import CONNECTIONS, pose, sensor_positions
@@ -272,16 +275,30 @@ def register_callbacks(app: Dash) -> None:
             rows = drafts.get(name) or rows_for(recording)
 
         names = names_of(rows)
-        problems = sensor_names.problems(names, recording.sensor_labels())
+        labels = recording.sensor_labels()
+        problems = sensor_names.problems(names, labels)
         unsaved = names != recording.sensor_names()
+        absent = sensor_names.absent(names, labels)
         if problems:
             summary = html.Div([html.Div("To sort out before stage 1 can run:", style={"fontWeight": "600"}),
                                 html.Ul([html.Li(problem) for problem in problems],
                                         style={"margin": "2px 0", "paddingLeft": "18px"})],
                                style={"color": MISSING_COLOUR})
         elif unsaved:
-            summary = html.Div("Every sensor has a name. Save them to use them.", style={"color": DOUBLE_COLOUR})
+            summary = html.Div("Every label has a name or is marked not used. Save them to use them.",
+                               style={"color": DOUBLE_COLOUR})
         else:
-            summary = html.Div(f"All {len(sensor_names.NAMES)} sensors have a name, and these are the ones "
-                               "stage 1 uses.", style={"color": "#2a9d8f"})
+            count = len(sensor_names.NAMES) - len(absent)
+            summary = html.Div(f"{'All ' if not absent else ''}{count} of {len(sensor_names.NAMES)} sensors have a "
+                               "name, and these are the ones stage 1 uses.", style={"color": "#2a9d8f"})
+        if absent and not (problems and any(problem.startswith("no name chosen") for problem in problems)):
+            present = {name for name in names.values() if name in sensor_names.NAMES}
+            summary = html.Div([summary, html.Div(
+                [html.Div("Without " + ", ".join(absent) + ", the analysis runs with less:",
+                          style={"fontWeight": "600"}),
+                 html.Ul([html.Li(line) for line in coverage.summary(present)[1:]],
+                         style={"margin": "2px 0", "paddingLeft": "18px"}),
+                 html.Div("Every rule and the reason for it: docs/missing_sensors.md; after recalculating, "
+                          "sensor_coverage.csv lists each metric.", style={"color": "#777"})],
+                style={"color": "#555", "marginTop": "6px"})])
         return rows, drafts, summary, naming_figure(rows), bool(problems) or not unsaved, message

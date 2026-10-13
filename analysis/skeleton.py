@@ -113,6 +113,17 @@ def _verify_topological_order(segments: dict) -> None:
 _verify_topological_order(SEGMENTS)
 
 
+DISPLAY_STAND_INS = {"chestbone": "lumbar", "lumbar": "chestbone"}
+"""For drawing only: a recording without one trunk sensor turns the whole trunk with the other, rather
+than leaving that part of the figure standing in the neutral pose."""
+
+
+def unmeasured(present) -> set[str]:
+    """The joints whose segment is drawn without its own sensor, for a recording with sensors ``present``."""
+    present = set(present)
+    return {joint for joint, (_, sensor, _) in SEGMENTS.items() if sensor is not None and sensor not in present}
+
+
 def pose(rotations: dict[str, Rotation]) -> tuple[dict[str, np.ndarray], dict[str, Rotation]]:
     """Joint positions and segment rotations for one frame.
 
@@ -120,12 +131,17 @@ def pose(rotations: dict[str, Rotation]) -> tuple[dict[str, np.ndarray], dict[st
     the segment's orientation relative to the neutral pose, in the one body
     frame every sensor is expressed in, so it is used as it is rather than
     composed with the parent's -- composing is right only at the neutral pose.
-    A segment with no sensor (the shoulders) turns with its parent.
+    A segment with no sensor (the shoulders) turns with its parent; so does a
+    limb segment whose sensor the recording lacks (the joint drawn straight),
+    and a missing trunk sensor's segment turns with the other trunk sensor
+    (:data:`DISPLAY_STAND_INS`).
     """
     positions = {"pelvis_center": np.zeros(3)}
     world = {"pelvis_center": Rotation.identity()}
     for joint, (parent, sensor, offset) in SEGMENTS.items():
         rotation = rotations.get(sensor) if sensor is not None else None
+        if rotation is None and sensor in DISPLAY_STAND_INS and rotations:
+            rotation = rotations.get(DISPLAY_STAND_INS[sensor])
         if rotation is None:
             rotation = world[parent]
         positions[joint] = positions[parent] + rotation.apply(offset)

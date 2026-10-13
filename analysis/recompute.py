@@ -11,6 +11,11 @@ Each recalculation also writes ``metrics_provenance.json``, recording a digest
 of the windows and recordings it used, the gyroscope bias it removed and the
 alignment the pairs were checked against, so the dashboard can tell whether
 the metrics on disk still match the session or something has changed since.
+
+When a selected recording lacks a sensor, ``sensor_coverage.csv`` says, per
+recording and metric, whether it was measured, measured with a stand-in or not
+calculated, and where windows were carried over from the other recording
+(:mod:`analysis.coverage`).
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from analysis import alignment, config, detection, recordings, smoothness_metrics
+from analysis import alignment, config, coverage, detection, recordings, smoothness_metrics
 from analysis.balance_metrics import (
     balance_signals,
     compute_asymmetry_metrics,
@@ -35,21 +40,35 @@ from analysis.balance_metrics import (
 from analysis.comparison import paired_comparison
 from analysis.config import TRIALS
 from analysis.figures import (
+    make_centre_of_mass_figure,
     make_knee_flexion_overview_figure,
     make_knee_traceability_figure,
     make_sequence_smoothness_figure,
     make_trunk_traceability_figure,
 )
 from analysis.kinematics import LoadedTrial
-from analysis.sessions import FAMILIES, FAMILY_KEY, SESSION_FILENAME, refresh_seconds, roles, save_session
+from analysis.sessions import CARRIED_OVER, FAMILIES, FAMILY_KEY, SESSION_FILENAME, refresh_seconds, roles, save_session
 from analysis.signals import idx_to_sec
 from analysis.validation import validate_session
 
 PROVENANCE_FILENAME = "metrics_provenance.json"
+COVERAGE_FILENAME = "sensor_coverage.csv"
 
 RETIRED_OUTPUTS = ("sequence_variability_summary.csv",)
 """Files earlier metric versions wrote that nothing writes any more; removed on
 recalculation so a stale copy cannot be read as current."""
+
+OUTPUTS = (
+    "trunk_rotation_event_windows.csv", "trunk_rotation_balance_metrics.csv",
+    "monopodal_stance_event_windows.csv", "monopodal_stance_balance_metrics.csv",
+    "monopodal_stance_asymmetry_metrics.csv", "sequence_smoothness_metrics.csv", "sequence_summary.csv",
+    "paired_comparison.csv", "recording_alignment.csv", COVERAGE_FILENAME,
+    "trunk_traceability_figure.png", "monopodal_stance_overview_figure.png",
+    "monopodal_stance_traceability_figure.png", "sequence_smoothness_figure.png", "centre_of_mass_figure.png",
+)
+"""Every table and figure a recalculation may write.  One it does not write this time -- a family
+with no events, a figure with nothing to draw -- is removed, so an earlier copy cannot pass for
+current."""
 
 DEFAULT_KNEE_LAG_WINDOW_S = (1.0, 2.0)
 """The single-leg lag window of sessions that leave it unset (v1)."""
@@ -74,14 +93,20 @@ LAG_COLUMNS = {
 }
 
 
-def flag_missing_lags(metrics: pd.DataFrame, columns: list[str]) -> list[str]:
-    """Rows whose lag is NaN: the correlation peaked on the edge of the search."""
+def flag_missing_lags(metrics: pd.DataFrame, columns: list[str], unmeasured: dict[str, set] | None = None) -> list[str]:
+    """Rows whose lag is NaN: the correlation peaked on the edge of the search.
+
+    ``unmeasured`` gives per recording the columns its sensors cannot provide;
+    a lag that is NaN for that reason is in ``sensor_coverage.csv`` instead.
+    """
     notes = []
     for column in columns:
         if column not in metrics:
             continue
         missing = metrics[metrics[column].isna()]
         for _, row in missing.iterrows():
+            if column in (unmeasured or {}).get(row["trial"], set()):
+                continue
             notes.append(
                 f"{row['trial']} {row.get('event_id', '')}: {column} has no interior peak within the "
                 "+/-1 s search, so no lag is reported"
@@ -119,6 +144,12 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
     for label in labels:
         for warning in trials[label].kin.calibration.warnings():
             log.append(f"WARNING  {label}: {warning}")
+        for line in coverage.summary(trials[label].kin.sensors):
+            log.append(f"note  {label}: {line}")
+    carried = carried_over(session, labels)
+    for label, families in carried.items():
+        for family, note in families.items():
+            log.append(f"note  {label}: {coverage.FAMILY_NAMES[family]} -- {note}; check them in the event editor")
 
     # --- trunk rotation ----------------------------------------------------
     trunk_rows: list[dict] = []
@@ -133,7 +164,8 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
             loaded = trials[label]
             start, end = window["event_start"], window["event_end"]
             stab_start, stab_end = window["stab_start"], window["stab_end"]
-            peak = detection.recompute_trunk_peak(loaded.kin, loaded.fs, start, end) if label == reference else np.nan
+            peak = (detection.recompute_trunk_peak(loaded.kin, loaded.fs, start, end)
+                    if label == reference and loaded.kin.has("lumbar", "chestbone") else np.nan)
             trunk_windows[label].append((start, end, stab_start, stab_end, peak))
             trunk_event_rows.append({
                 "trial": label,
@@ -207,7 +239,8 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
     paired = paired_comparison({"trunk": trunk_metrics, "knee": knee_metrics, "smooth": smooth_metrics})
 
     for family, frame in (("smooth", smooth_metrics), ("trunk", trunk_metrics), ("knee", knee_metrics)):
-        for note in flag_missing_lags(frame, LAG_COLUMNS[family]):
+        unmeasured = {label: coverage.unmeasured(trials[label].kin.sensors, family) for label in labels}
+        for note in flag_missing_lags(frame, LAG_COLUMNS[family], unmeasured):
             log.append("note  " + note)
 
     sources = {label: trials[label].recording.name for label in labels}
@@ -243,6 +276,14 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
             if (folder / name).exists():
                 (folder / name).unlink()
                 log.append(f"removed {name}, which the current metric version no longer writes")
+        table = coverage.coverage_table({label: set(trials[label].kin.sensors) for label in labels}, sources,
+                                        carried)
+        if len(table):
+            table.to_csv(folder / COVERAGE_FILENAME, index=False)
+            written.append(COVERAGE_FILENAME)
+        elif (folder / COVERAGE_FILENAME).exists():
+            (folder / COVERAGE_FILENAME).unlink()
+            log.append(f"removed {COVERAGE_FILENAME}: every selected recording now has all its sensors")
 
         kins = {label: trials[label].kin for label in labels}
         fs_of = {label: trials[label].fs for label in labels}
@@ -258,6 +299,23 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
         if len(smooth_metrics) > 0:
             make_sequence_smoothness_figure(signals, fs_of, smooth_metrics, corridors, sources, folder)
             written.append("sequence_smoothness_figure.png")
+        has_com = any(signals[label]["com_height"] is not None or signals[label]["weight_index"] is not None
+                      for label in labels)
+        if len(trunk_metrics) + len(knee_metrics) + len(smooth_metrics) > 0 and has_com:
+            spans = {label: {
+                "trunk": [(start / fs_of[label], end / fs_of[label]) for start, end, *_ in trunk_windows[label]],
+                "knee": [(ev["window_start_s"], ev["window_end_s"]) for ev in knee_events[label]],
+                "smooth": [(row["turn_start_s"], row["turn_end_s"]) for _, row in smooth_metrics.iterrows()
+                           if row["trial"] == label],
+            } for label in labels}
+            make_centre_of_mass_figure(signals, fs_of, {"trunk": trunk_metrics, "knee": knee_metrics,
+                                                        "smooth": smooth_metrics}, spans, sources, folder)
+            written.append("centre_of_mass_figure.png")
+
+        for name in OUTPUTS:
+            if name not in written and (folder / name).exists():
+                (folder / name).unlink()
+                log.append(f"removed {name} from an earlier recalculation: nothing to put in it this time")
 
         save_session(refresh_seconds(session, trials))
         written.append(SESSION_FILENAME)
@@ -273,6 +331,26 @@ def recompute(session: dict, trials: dict[str, LoadedTrial], write: bool = True)
         written=written,
         log=log,
     )
+
+
+def carried_over(session: dict, labels: list[str]) -> dict[str, dict[str, str]]:
+    """Per recording and family, how many enabled windows were carried over from the other recording.
+
+    A window keeps that mark until its movement boundaries are edited by hand
+    (:data:`analysis.sessions.CARRIED_OVER`).
+    """
+    out: dict[str, dict[str, str]] = {}
+    for family in FAMILIES:
+        for label in labels:
+            windows = [event["windows"][label] for event in session.get(FAMILY_KEY[family], [])
+                       if event.get("enabled", True) and label in event.get("windows", {})]
+            count = sum((window.get("source") or {}).get("event") == CARRIED_OVER for window in windows)
+            if count:
+                other = next((window.get("carried_from") for window in windows if window.get("carried_from")), "")
+                out.setdefault(label, {})[family] = (
+                    f"{count} of {len(windows)} windows carried over from the {other.lower() or 'other'} recording "
+                    "through the alignment")
+    return out
 
 
 def with_version(frame: pd.DataFrame) -> pd.DataFrame:

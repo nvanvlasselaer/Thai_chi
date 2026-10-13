@@ -27,6 +27,7 @@ TABLES = {
     "trunk_windows": ("Trunk windows", "trunk_rotation_event_windows.csv"),
     "knee_windows": ("Stance windows", "monopodal_stance_event_windows.csv"),
     "alignment": ("Alignment", "recording_alignment.csv"),
+    "coverage": ("Sensor coverage", "sensor_coverage.csv"),
     "inventory": ("Sensor inventory", None),
 }
 FIGURES = [
@@ -34,6 +35,7 @@ FIGURES = [
     ("monopodal_stance_traceability_figure.png", "Single-leg stance: support windows and paired metrics"),
     ("monopodal_stance_overview_figure.png", "Single-leg stance: which foot was up, the knees and the pelvis"),
     ("sequence_smoothness_figure.png", "Sequence turns: smoothness and chest-pelvis coordination"),
+    ("centre_of_mass_figure.png", "Centre of mass: weight transfer, height and depth in every family"),
 ]
 NUMBER = Format(precision=4, scheme=Scheme.decimal_or_exponent)
 
@@ -83,6 +85,9 @@ def _table(key: str) -> tuple[list[dict], list[dict], str]:
         source = " + ".join(_relative(path) for path in present)
     else:
         path = recordings.analysis_dir() / name
+        if not path.exists() and key == "coverage":
+            return [], [], ("No sensor_coverage.csv: every selected recording has all 14 sensors, so every metric "
+                            "is measured. It is written when a recording lacks one (docs/missing_sensors.md).")
         if not path.exists():
             return [], [], f"{_relative(path)} has not been written yet."
         frame = pd.read_csv(path)

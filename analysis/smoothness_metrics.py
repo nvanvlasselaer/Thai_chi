@@ -6,7 +6,7 @@ hand-picked events.  Between them the recording is unmeasured, so nothing
 describes how the *form as a whole* is performed.  This module scores the turns
 that :func:`analysis.detection.detect_yaw_turns` cuts the recording into -- one
 single-direction turn of the chest each, from one moment of stillness to the
-next -- on two questions:
+next -- on three questions:
 
 * **How smooth is the turn?**  SPARC, the spectral arc length of the turning
   speed, is the primary measure; the submovement rate is the crude version of
@@ -18,6 +18,9 @@ next -- on two questions:
 * **Do chest and pelvis turn together?**  A lag says *when* they move relative
   to each other; the gain and the relative-yaw range say *how much* they
   dissociate.
+* **Where does the weight go?**  How much of it moves from one foot to the
+  other during the turn, and how level and how low the centre of mass stays
+  (:mod:`analysis.com`).
 
 Turning speed and excursion come from the bias-corrected gyroscope projected on
 the vertical (:func:`analysis.gravity.vertical_angular_velocity`), integrated
@@ -39,6 +42,8 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
+from analysis.com import com_metrics
+from analysis.coverage import blank_unmeasured
 from analysis.data_io import TrialData
 from analysis.gravity import vertical_angular_velocity
 from analysis.kinematics import Kinematics
@@ -189,18 +194,24 @@ def turn_shape_corridor(progress: list[np.ndarray]) -> dict[str, np.ndarray | in
 # ---------------------------------------------------------------------------
 
 
-def turn_signals(kin: Kinematics, trial: TrialData, fs: float) -> dict[str, np.ndarray]:
+def turn_signals(kin: Kinematics, trial: TrialData, fs: float) -> dict[str, object]:
     """The per-recording signals every turn is measured on, computed once.
 
     ``chest_rate`` and ``pelvis_rate`` are the vertical angular velocities (deg/s),
     low-passed at 6 Hz; ``chest_yaw`` is the high-passed Euler yaw, used only for
-    the secondary jerk column and for display.
+    the secondary jerk column and for display.  A signal whose sensor the
+    recording lacks is None; ``sensors`` names the ones it has.
     """
+    chest, pelvis = kin.has("chestbone"), kin.has("lumbar")
     return {
-        "chest_rate": lowpass_signal(vertical_angular_velocity(kin, trial, "chestbone"), fs, cutoff_hz=6.0),
-        "pelvis_rate": lowpass_signal(vertical_angular_velocity(kin, trial, "lumbar"), fs, cutoff_hz=6.0),
-        "chest_yaw": highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05),
-        "pelvis_yaw": highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05),
+        "chest_rate": (lowpass_signal(vertical_angular_velocity(kin, trial, "chestbone"), fs, cutoff_hz=6.0)
+                       if chest else None),
+        "pelvis_rate": (lowpass_signal(vertical_angular_velocity(kin, trial, "lumbar"), fs, cutoff_hz=6.0)
+                        if pelvis else None),
+        "chest_yaw": highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs, cutoff_hz=0.05) if chest else None,
+        "pelvis_yaw": highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs, cutoff_hz=0.05) if pelvis else None,
+        "sensors": kin.sensors,
+        "n_samples": len(kin.t),
     }
 
 
@@ -212,15 +223,19 @@ def yaw_lag(signals: dict[str, np.ndarray], fs: float, window: slice) -> tuple[f
     untouched by the high-pass.  Angles rather than velocities, because the two
     do not turn as shifted copies: velocities time the peak turning speed and
     give lags a third as long, angles time the turn as a whole, which is what
-    earlier results and the literature report.
+    earlier results and the literature report.  NaN without either sensor.
     """
+    if signals["pelvis_rate"] is None or signals["chest_rate"] is None:
+        return float("nan"), float("nan")
     pelvis = np.cumsum(signals["pelvis_rate"][window]) / fs
     chest = np.cumsum(signals["chest_rate"][window]) / fs
     return pearson_lag(pelvis, chest, fs)
 
 
 def turn_progress(signals: dict[str, np.ndarray], fs: float, start: int, end: int) -> np.ndarray:
-    """Fraction of the turn's excursion completed at each sample (0 to 1)."""
+    """Fraction of the turn's excursion completed at each sample (0 to 1); NaN without the chest sensor."""
+    if signals["chest_rate"] is None:
+        return np.full(max(0, end - start), np.nan)
     angle = np.cumsum(signals["chest_rate"][start:end]) / fs
     total = angle[-1] if len(angle) else 0.0
     return angle / total if abs(total) > 1e-9 else np.full(len(angle), np.nan)
@@ -236,12 +251,16 @@ def compute_turn_metrics(
     direction: int | None = None,
     lag_pad_s: float | None = None,
 ) -> dict[str, float | str]:
-    """Smoothness and chest-pelvis coordination for one turn.
+    """Smoothness, chest-pelvis coordination and the centre of mass, for one turn.
 
-    ``lag_pad_s`` widens only the lag window, as for the trunk family: the lag
-    is a property of the coordination around the turn, and a turn of 2-3 s
-    cannot support a +/-1 s search on its own.
+    ``signals`` are :func:`analysis.balance_metrics.balance_signals`, which
+    include the centre of mass's.  ``lag_pad_s`` widens only the lag window, as
+    for the trunk family: the lag is a property of the coordination around the
+    turn, and a turn of 2-3 s cannot support a +/-1 s search on its own.
+    Without the chest or the lumbar sensor, the columns that need it are NaN
+    (:data:`analysis.coverage.METRICS`).
     """
+    nan = np.full(max(0, end - start), np.nan)
     chest, pelvis = signals["chest_rate"], signals["pelvis_rate"]
     turn = slice(start, end)
     duration_s = (end - start) / fs
@@ -250,28 +269,32 @@ def compute_turn_metrics(
         lag_window = turn
     else:
         pad = int(round(lag_pad_s * fs))
-        lag_window = slice(max(0, start - pad), min(len(chest), end + pad))
+        lag_window = slice(max(0, start - pad), min(signals["n_samples"], end + pad))
     r, lag = yaw_lag(signals, fs, lag_window)
 
-    chest_angle = np.cumsum(chest[turn]) / fs
-    pelvis_angle = np.cumsum(pelvis[turn]) / fs
+    chest_angle = np.cumsum(chest[turn]) / fs if chest is not None else nan
+    pelvis_angle = np.cumsum(pelvis[turn]) / fs if pelvis is not None else nan
     relative = chest_angle - pelvis_angle
     chest_excursion = float(abs(chest_angle[-1])) if len(chest_angle) else float("nan")
     pelvis_excursion = float(abs(pelvis_angle[-1])) if len(pelvis_angle) else float("nan")
-    submovements, peak_rate = count_submovements(chest[turn], fs)
-    jerk = dimensionless_jerk(signals["chest_yaw"][turn], fs)
+    submovements, peak_rate = count_submovements(chest[turn], fs) if chest is not None else (0, float("nan"))
+    jerk = dimensionless_jerk(signals["chest_yaw"][turn], fs) if chest is not None else float("nan")
+    if direction is None:
+        angle = chest_angle if chest is not None else pelvis_angle
+        direction = int(np.sign(angle[-1])) if len(angle) and np.isfinite(angle[-1]) else 0
 
-    return {
+    row = {
         "trial": label,
         "event_id": event_id,
-        "direction": direction if direction is not None else int(np.sign(chest_angle[-1])) if len(chest_angle) else 0,
+        "direction": direction,
         "turn_start_s": start / fs,
         "turn_end_s": end / fs,
         "turn_duration_s": duration_s,
         "chest_yaw_excursion_deg": chest_excursion,
         "pelvis_yaw_excursion_deg": pelvis_excursion,
-        "chest_yaw_peak_rate_dps": float(np.max(np.abs(chest[turn]))) if duration_s > 0 else float("nan"),
-        "chest_yaw_sparc": sparc(chest[turn], fs),
+        "chest_yaw_peak_rate_dps": (float(np.max(np.abs(chest[turn]))) if duration_s > 0 and chest is not None
+                                    else float("nan")),
+        "chest_yaw_sparc": sparc(chest[turn], fs) if chest is not None else float("nan"),
         "chest_yaw_submovement_count": submovements,
         "chest_yaw_submovement_rate_hz": submovements / duration_s if duration_s > 0 else float("nan"),
         "chest_pelvis_yaw_r": r,
@@ -284,7 +307,9 @@ def compute_turn_metrics(
         "relative_yaw_range_deg": float(np.ptp(relative)) if len(relative) else float("nan"),
         "relative_yaw_sd_deg": float(np.std(relative)) if len(relative) else float("nan"),
         "chest_yaw_log10_dimensionless_jerk": math.log10(jerk) if jerk and jerk > 0 else float("nan"),
+        **com_metrics(signals, turn),
     }
+    return blank_unmeasured(row, signals["sensors"], "smooth")
 
 
 SUMMARY_METRICS = (
@@ -296,6 +321,9 @@ SUMMARY_METRICS = (
     "chest_pelvis_lag_s",
     "chest_pelvis_gain",
     "relative_yaw_range_deg",
+    "com_weight_transfer",
+    "com_height_range_pct_height",
+    "com_lowering_pct_height",
 )
 
 
@@ -312,6 +340,8 @@ def sequence_summary(metrics: pd.DataFrame) -> pd.DataFrame:
             "n_turns": int(len(group)),
             "total_turn_s": float(group["turn_duration_s"].sum()),
         }
-        row.update({f"{name}_median": float(group[name].median()) for name in SUMMARY_METRICS})
+        # A metric the recording's sensors cannot provide is all NaN, and its median NaN.
+        row.update({f"{name}_median": float(group[name].median()) if group[name].notna().any() else float("nan")
+                    for name in SUMMARY_METRICS})
         rows.append(row)
     return pd.DataFrame(rows)

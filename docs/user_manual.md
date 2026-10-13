@@ -51,7 +51,16 @@ When the labels spell the names, as they do in the two original recordings, ther
 - *reads as*: the label's words, such as `Left Upper Arm`, `R_Shank`, `Sternum` or `Sacrum`. A label without a side (`Thigh`) is not taken for either side;
 - *sensor 84483 is lhumerus in …*: a label that says nothing (`Sensor 3 (84483)`) gets the name its serial number had in another recording. The same sensor may have been strapped to another segment this time, so check these against how the sensors were placed.
 
-Change any name with its dropdown, or choose **not used** for a sensor the analysis should leave out. The figure beside the table shows the body from the front with each sensor spot labelled with what it has been given: a spot marked **no sensor** (red) or **2 sensors** (orange) needs fixing, and the list under the table says what else does. When every name has been given exactly once, **Save these names** writes them to the recording's `sensor_names.json`, and **Run pipeline** processes the recording with them. **Back to the suggestions** discards your changes.
+Change any name with its dropdown, or choose **not used** for a sensor the analysis should leave out. The figure beside the table shows the body from the front with each sensor spot labelled with what it has been given. A spot marked **2 sensors** (orange) needs fixing, and the list under the table says what else does. A spot marked **no sensor** (red) is allowed: the recording lacks that sensor, and the card lists what the analysis leaves out without it. When every label has a name (or *not used*) and no name is given twice, **Save these names** writes them to the recording's `sensor_names.json`, and **Run pipeline** processes the recording with them. **Back to the suggestions** discards your changes.
+
+### When a sensor is missing
+
+Many recordings lack a sensor: a hand, or the sternum. The analysis then runs with what it has. Each metric is measured, measured with a validated stand-in, or left empty; [docs/missing_sensors.md](missing_sensors.md) lists every rule and why. On the dashboard:
+
+- the **Sensor names** card and the pipeline log say what the missing sensor costs;
+- the **Kinematics check** table lists the sensor as *missing*, its traces are left out of the joint-angle panels (the panel title says so), and the stick figure draws its segment dashed and grey, following its neighbour;
+- in the **event editor**, a subplot whose signal needs the sensor says *not recorded* in its title. Where a family cannot be detected in a recording (no chest: no trunk rotations or turns; no thigh: no stances), its windows are carried over from the other recording through the alignment. They show the flag **carried over** in the event list and a warning above the plots until you edit them. Check them against the recording's own signals before relying on their movement-window metrics;
+- after recalculating, `sensor_coverage.csv` on the **Results** page lists, per recording and metric, whether it was measured, measured with a stand-in, or not calculated, and why.
 
 Saving different names for a recording that has been processed marks it for stage 1 again. The figure only shows what was *assigned*; whether each sensor really sat on that segment shows on the Kinematics check page, where the *recorded as* column and the stick figure's sensor markers name each sensor's label in the file.
 
@@ -401,9 +410,9 @@ The **overlap** column is how much of the shorter of the two windows the other c
 
 ## 7. Recalculating and interpreting the results
 
-Press **Recalculate metrics** — here, or **Recalculate** on the Pipeline page. It validates the windows, recomputes everything, rewrites the result CSVs and regenerates the four traceability figures, which appear below the table. Every table and figure is also on the **Results** page, and the Pipeline page's metrics card turns **done**.
+Press **Recalculate metrics** — here, or **Recalculate** on the Pipeline page. It validates the windows, recomputes everything, rewrites the result CSVs and regenerates the figures, which appear below the table. Every table and figure is also on the **Results** page, and the Pipeline page's metrics card turns **done**.
 
-**This overwrites the result files in place.** The previous values remain in git. Every CSV carries a `metrics_version` column: version 2 is the current definition; the numbers of the June write-up are version 1, reproduced by the git tag `metrics-v1`.
+**This overwrites the result files in place.** The previous values remain in git. Every CSV carries a `metrics_version` column: version 3 is the current definition — version 2 with the centre of mass added, every version-2 column unchanged; the numbers of the June write-up are version 1, reproduced by the git tag `metrics-v1`. After an update that raises the version, the metrics card shows **out of date** until you recalculate.
 
 ### What each metric means
 
@@ -415,7 +424,9 @@ The axes are **x = mediolateral, y = anteroposterior, z = vertical**. Sway is th
 | --- | --- | --- | --- |
 | `trunk_pelvis_lag_s` | event ±2 s | How far the chest's turn trails the pelvis's, from their turning angles. `trunk_pelvis_yaw_r` is the correlation behind it — near 1 for everyone, so it says the lag is meaningful, not who coordinates better. | Negative = the pelvis leads. Near zero = they turn together. |
 | `trunk_yaw_sparc` | event | Smoothness of the trunk-on-pelvis turning speed (spectral arc length). | **Less negative = smoother.** |
-| `lumbar_ml_acc_rms_mps2`, `lumbar_ap_acc_rms_mps2` | after the rotation | Side-to-side / fore-aft sway of the pelvis, m/s². | Lower = steadier. |
+| `com_weight_transfer` | event | How much of the body weight moved from one foot to the other during the rotation (see [The centre of mass](#the-centre-of-mass)). Empty when a foot was stepping for most of it. | 0 = none, 1 = all of it, from one foot fully onto the other. |
+| `com_height_range_pct_height`, `com_lowering_pct_height` | event | How far the centre of mass rose and sank, and how far below upright standing it sat on average, in % of body height. | A small range = level; a larger lowering = sitting deeper into the stance. |
+| `lumbar_ml_acc_rms_mps2`, `lumbar_ap_acc_rms_mps2` | after the rotation | Side-to-side / fore-aft sway of the pelvis, m/s² — what it does faster than about 0.4 Hz; a slow weight shift does not show in it. | Lower = steadier. |
 | `lumbar_frontal_tilt_sd_deg`, `lumbar_sagittal_tilt_sd_deg` | after | How much the pelvis tilts sideways / forward-backward. | Lower = more stable posture. |
 | `lumbar_rms_angular_velocity_dps` | after | Overall rotational "busyness" of the pelvis. Needs no threshold. | Lower = quieter. |
 | `lumbar_corrective_peak_rate_hz` | after | Sharp adjustments per second. Secondary: zero in most windows. | Lower = fewer corrections. |
@@ -427,6 +438,7 @@ The axes are **x = mediolateral, y = anteroposterior, z = vertical**. Sway is th
 | `support_duration_s`, `peak_lift_index` | support | How long on one leg, and how high the foot went. |
 | `peak_knee_flexion_deg`, `knee_extension_while_lifted_deg`, `peak_hip_flexion_deg` | support | What the lifted leg did; the extension is large for a kick (60–100° here), small for a knee lift. |
 | `support_ml_acc_rms_mps2`, `support_frontal_tilt_sd_deg`, `support_rms_angular_velocity_dps`, … | support | **Balance on one foot**: sway, tilt and angular activity of the pelvis while the base of support is a single foot. |
+| `support_com_height_range_pct_height`, `support_com_lowering_pct_height` | support | How far the centre of mass rose as the leg went up, and its mean height relative to upright standing (negative: above it). No weight transfer: all the weight is on one foot. |
 | `settle_…` | after touch-down | The same measures while settling. |
 | `time_to_stabilization_s` | — | Touch-down to the start of settling. Sensitive to where the boundaries are (see below). |
 
@@ -435,6 +447,31 @@ The axes are **x = mediolateral, y = anteroposterior, z = vertical**. Sway is th
 #### Sequence turns
 
 See [§10](#what-each-metric-means-1).
+
+#### The centre of mass
+
+Shifting the weight is half of Tai Chi, and the lumbar sway cannot see it: the orientation filter takes
+a horizontal acceleration as slow as a weight shift (a few seconds) for a tilt of the sensor and folds
+it into the orientation, so the sway is what the pelvis does faster than about 0.4 Hz. The centre of
+mass is therefore built from the segments instead, from the tilt of every segment, which the filter
+gets right, and the segment masses and lengths of a standard body model, all in proportion to body
+height — so it needs no participant's height, and its numbers are in % of height (1 % ≈ 1.7 cm at
+1.70 m). `centre_of_mass_figure.png` draws its two signals with every family's windows:
+
+- **height** above the floor, relative to the neutral pose. It rises by 2–5 % of height in a
+  single-leg stance as the leg goes up, and by about 1 % when the arms are raised.
+- **weight index** — which foot the centre of mass is over: 0 the left, 1 the right, 0.5 even. With
+  both feet down that is the share of the weight on the right foot. It is drawn faint where it does
+  not mean that: while a foot is stepping (found from the two ankles moving relative to each other,
+  not from the foot sensors), and while the feet are closer than hip-width apart.
+
+It is checked against what has to hold: through every single-leg support the index stays within
+0.03–0.08 of the stance foot (median), and with both feet still through a weight shift the two ankles
+agree on where the floor is to about 2 cm. It does **not** give an absolute horizontal position — the
+trained recording's index reads about 0.35 in symmetric standing, an offset toward the left foot that
+cancels in a transfer — nor a path over the ground, which is why there are no AP/ML columns for it.
+The README's [Centre of mass](../README.md#centre-of-mass) section has the numbers, and the sources
+are in [§11](#11-literature).
 
 #### Novice versus trained
 
@@ -543,6 +580,8 @@ Per turn, in `sequence_smoothness_metrics.csv`; `sequence_summary.csv` holds eac
 | `chest_pelvis_lag_s` | How far the chest's turn trails the pelvis's. | Negative = the pelvis leads. |
 | `chest_pelvis_gain` | Pelvis turn ÷ chest turn. | 1 = the trunk turns as a unit; below 1 the chest turns on a comparatively still pelvis (~0.56 here). |
 | `relative_yaw_range_deg`, `relative_yaw_sd_deg` | How much axial twist opens up inside the turn. | Larger = more dissociation between chest and pelvis. |
+| `com_weight_transfer` | How much of the body weight moved from one foot to the other during the turn (see [The centre of mass](#the-centre-of-mass)). Empty when a foot was stepping for most of the turn. | 0 = none, 1 = all of it. |
+| `com_height_range_pct_height`, `com_lowering_pct_height` | How far the centre of mass rose and sank, and how far below upright standing it sat, in % of body height. | A small range = level. |
 | `chest_yaw_log10_dimensionless_jerk` | Secondary, kept for comparability. | Lower = smoother, in principle. |
 
 **Why jerk is secondary.** For movements this slow the jerk integral is dominated by noise near the
@@ -560,3 +599,80 @@ are; every turn being a different movement, it is not repetition variability.
 The session file `outputs/analyses/<selection>/event_editor_session.json` is plain, readable JSON holding every boundary
 in sample indices and seconds, with a note of whether each was set automatically or by hand. If the
 interface ever disagrees with what you expect, that file is the authority.
+
+---
+
+## 11. Literature
+
+The sources the methods in this manual rest on, grouped by what they are used for. The background
+reading on nonlinear measures and Tai Chi is in [literature/Literature.md](literature/Literature.md).
+
+### Orientation
+
+- Madgwick, S. O. H., Harrison, A. J. L., & Vaidyanathan, R. (2011). Estimation of IMU and MARG
+  orientation using a gradient descent algorithm. *IEEE International Conference on Rehabilitation
+  Robotics*, 5975346. [doi:10.1109/ICORR.2011.5975346](https://doi.org/10.1109/ICORR.2011.5975346) —
+  the 6-axis orientation filter of stage 1.
+
+### Centre of mass
+
+- Winter, D. A. (2009). *Biomechanics and Motor Control of Human Movement* (4th ed.). Wiley. — the
+  segment masses and centre-of-mass positions (Table 4.1, from Dempster's cadaver data) and the
+  segment lengths as fractions of body height (Fig. 4.1, after Drillis & Contini).
+- Dempster, W. T. (1955). *Space requirements of the seated operator* (WADC Technical Report 55-159).
+  Wright-Patterson Air Force Base. — the cadaver data behind Winter's Table 4.1.
+- Drillis, R., & Contini, R. (1966). *Body segment parameters* (Technical Report 1166-03). New York
+  University, School of Engineering and Science. — segment lengths in proportion to height.
+- Harrington, M. E., Zavatsky, A. B., Lawson, S. E. M., Yuan, Z., & Theologis, T. N. (2007).
+  Prediction of the hip joint centre in adults, children, and patients with cerebral palsy based on
+  magnetic resonance imaging. *Journal of Biomechanics*, 40(3), 595–602.
+  [doi:10.1016/j.jbiomech.2006.02.003](https://doi.org/10.1016/j.jbiomech.2006.02.003) — the distance
+  between the hip joints.
+- Germanotta, M., Mileti, I., Conforti, I., Del Prete, Z., Aprile, I., & Palermo, E. (2021).
+  Estimation of human center of mass position through the inertial sensors-based methods in postural
+  tasks: an accuracy evaluation. *Sensors*, 21(2), 601.
+  [doi:10.3390/s21020601](https://doi.org/10.3390/s21020601) — a pelvis and lower-limb segment model
+  estimates the centre of mass better than a single pelvis sensor when it moves more: the reason the
+  centre of mass is built from the segments.
+- Law, N.-Y., & Li, J. X. (2014). The temporospatial and kinematic characteristics of typical Tai Chi
+  movements: Repulse Monkey and Wave-hand in Cloud. *Research in Sports Medicine*, 22(2), 111–123.
+  [doi:10.1080/15438627.2014.881819](https://doi.org/10.1080/15438627.2014.881819) — Tai Chi moves the
+  centre of mass further vertically and mediolaterally than walking.
+- Leung, E. S. F., & Tsang, W. W. N. (2008). Comparison of the kinetic characteristics of standing
+  and sitting Tai Chi forms. *Disability and Rehabilitation*, 30(25), 1891–1900.
+  [doi:10.1080/09638280802358563](https://doi.org/10.1080/09638280802358563) — centre of pressure and
+  of mass during a Tai Chi form, reported in % of body height.
+
+### Smoothness
+
+- Balasubramanian, S., Melendez-Calderon, A., & Burdet, E. (2012). A robust and sensitive metric for
+  quantifying movement smoothness. *IEEE Transactions on Biomedical Engineering*, 59(8), 2126–2136.
+  [doi:10.1109/TBME.2011.2179545](https://doi.org/10.1109/TBME.2011.2179545) — SPARC.
+- Balasubramanian, S., Melendez-Calderon, A., Roby-Brami, A., & Burdet, E. (2015). On the analysis of
+  movement smoothness. *Journal of NeuroEngineering and Rehabilitation*, 12, 112.
+  [doi:10.1186/s12984-015-0090-9](https://doi.org/10.1186/s12984-015-0090-9) — the SPARC defaults
+  used (padlevel 4, 10 Hz cutoff, 0.05 amplitude threshold) and the reference implementation the
+  method checks compare against.
+- Melendez-Calderon, A., Shirota, C., & Balasubramanian, S. (2021). Estimating movement smoothness
+  from inertial measurement units. *Frontiers in Bioengineering and Biotechnology*, 8, 558771.
+  [doi:10.3389/fbioe.2020.558771](https://doi.org/10.3389/fbioe.2020.558771) — SPARC is valid on
+  gyroscope angular velocity, where log dimensionless jerk is error prone.
+- Beck, Y., Herman, T., Brozgol, M., Giladi, N., Mirelman, A., & Hausdorff, J. M. (2018). SPARC: a new
+  approach to quantifying gait smoothness in patients with Parkinson's disease. *Journal of
+  NeuroEngineering and Rehabilitation*, 15, 49.
+  [doi:10.1186/s12984-018-0398-3](https://doi.org/10.1186/s12984-018-0398-3) — SPARC on a lower-back
+  sensor's acceleration and angular velocity (PDF in `literature/pdf/`).
+
+### Boundary robustness
+
+- Shrout, P. E., & Fleiss, J. L. (1979). Intraclass correlations: uses in assessing rater
+  reliability. *Psychological Bulletin*, 86(2), 420–428.
+  [doi:10.1037/0033-2909.86.2.420](https://doi.org/10.1037/0033-2909.86.2.420) — ICC(1,1).
+
+### Planned
+
+- Loper, M., Mahmood, N., Romero, J., Pons-Moll, G., & Black, M. J. (2015). SMPL: a skinned
+  multi-person linear model. *ACM Transactions on Graphics*, 34(6), 248.
+  [doi:10.1145/2816795.2818013](https://doi.org/10.1145/2816795.2818013) — the body model to be fitted
+  to video (see the README's
+  [Planned: the centre of mass from video](../README.md#planned-the-centre-of-mass-from-video-smpl)).

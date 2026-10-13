@@ -16,24 +16,26 @@ the one onto the other, per recording.
 * A mapping someone has checked is saved as ``sensor_names.json`` in the
   recording's output folder (:func:`save`), and stage 1 parses the recording
   with it.  A label can also be marked *not used* -- a spare or an EMG sensor.
-* :func:`problems` says what keeps a mapping from being used: a name no sensor
-  has, a name two sensors have, or a label not decided on.
+* :func:`problems` says what keeps a mapping from being used: a name two
+  sensors have, a label not decided on, or no name at all.  A name no sensor
+  has is not one of them: :func:`absent` lists those, and the analysis runs
+  without them (:mod:`analysis.coverage`, ``docs/missing_sensors.md``).
 
 Nothing here reads more of a recording than its eight header rows.
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from analysis import config
+from analysis.data_io import read_header
 
 NAMES = tuple(config.SENSOR_MAP)
-"""Every name the analysis uses, in the order it lists its sensors.  All are needed."""
+"""Every name the analysis uses, in the order it lists its sensors.  A recording may lack some of them."""
 
 UNUSED = None
 """What a label maps to when its sensor is left out of the analysis."""
@@ -49,9 +51,7 @@ SPELLED, READ_AS, SERIAL = "spelled", "read as", "serial"
 
 def read_labels(path: Path) -> list[str]:
     """The sensor labels in a Delsys export's fourth row, in file order, e.g. ``L_humerus (84483)``."""
-    with path.open(newline="", encoding="utf-8", errors="replace") as handle:
-        reader = csv.reader(handle)
-        rows = [next(reader, []) for _ in range(4)]
+    rows, _, _ = read_header(path)
     return [cell.strip() for cell in rows[3] if cell.strip()]
 
 
@@ -169,7 +169,11 @@ def automatic(labels: list[str]) -> dict[str, str]:
 
 
 def problems(names: dict[str, str | None], labels: list[str]) -> list[str]:
-    """What keeps ``names`` (``{label: name or None for not used}``) from being used, in words."""
+    """What keeps ``names`` (``{label: name or None for not used}``) from being used, in words.
+
+    A name no sensor has is not a problem: the analysis runs without that
+    sensor (:func:`absent`).
+    """
     found = []
     undecided = [label for label in labels if label not in names]
     if undecided:
@@ -178,10 +182,15 @@ def problems(names: dict[str, str | None], labels: list[str]) -> list[str]:
         holders = [label for label in labels if names.get(label) == name]
         if len(holders) > 1:
             found.append(f"{name} is given to {len(holders)} sensors: " + ", ".join(holders))
-    missing = [name for name in NAMES if name not in {names.get(label) for label in labels}]
-    if missing:
-        found.append("no sensor is " + ", ".join(missing) + f" (the analysis needs all {len(NAMES)})")
+    if labels and not undecided and not any(names.get(label) in NAMES for label in labels):
+        found.append("no sensor has one of the analysis's names")
     return found
+
+
+def absent(names: dict[str, str | None], labels: list[str]) -> list[str]:
+    """The analysis names no sensor has, in the order it lists them: what the analysis will run without."""
+    given = {names.get(label) for label in labels}
+    return [name for name in NAMES if name not in given]
 
 
 def used(names: dict[str, str | None]) -> dict[str, str]:

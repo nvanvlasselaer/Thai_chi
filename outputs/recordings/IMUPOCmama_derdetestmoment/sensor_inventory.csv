@@ -1,0 +1,14 @@
+recording,sensor,recorded_as,body_segment,samples,duration_s,fs_hz,median_dt_s,max_dt_s,missing_channel_values,complete_accel_gyro
+IMUPOCmama_derdetestmoment.csv,chestbone,Avanti Sensor 7 (84663),Thorax,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,lfoot,Avanti Sensor 13 (84643),Left Foot,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,lhumerus,Avanti Sensor 3 (84483),Left Upper Arm,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,lthigh,Avanti Sensor 9 (84570),Left Thigh,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,ltibia,Avanti Sensor 11 (84492),Left Shank,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,lulna,Avanti Sensor 0 (84551),Left Forearm,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,lumbar,Avanti Sensor 8 (84573),Pelvis/Lower Trunk Proxy,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rfoot,Avanti Sensor 14 (84644),Right Foot,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rhand,Avanti Sensor 1 (84494),Right Hand,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rhumerus,Avanti Sensor 2 (84625),Right Upper Arm,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rthigh,Avanti Sensor 10 (84624),Right Thigh,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rtibia,Avanti Sensor 12 (84607),Right Shank,85500,230.847,370.3704,0.0027,0.0027,0,True
+IMUPOCmama_derdetestmoment.csv,rulna,Avanti Sensor 4 (84642),Right Forearm,85500,230.847,370.3704,0.0027,0.0027,0,True

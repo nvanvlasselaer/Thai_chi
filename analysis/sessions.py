@@ -13,6 +13,11 @@ load, so there is no rounding ambiguity anywhere.
 This module seeds a session from the detectors, edits it (add, delete to a
 trash, restore), migrates older files, and keeps named copies alongside the
 working one.
+
+When a recording lacks a sensor its family's detector needs (no chest: no
+trunk rotations or turns; no thigh: no stances), the other recording's windows
+are carried over onto its clock by the whole-recording alignment and marked
+:data:`CARRIED_OVER` until edited (:mod:`analysis.coverage`).
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from analysis import alignment, config, detection, detection_v1, recordings
+from analysis import alignment, config, coverage, detection, detection_v1, recordings
 from analysis.config import TRIALS
 from analysis.detection import find_knee_flexion_windows
 from analysis.detection_v1 import find_stabilization as find_stabilization_v1
@@ -66,6 +71,14 @@ FAMILY_DESCRIPTION = {
 
 LAG_PAD_S = 2.0
 """Seconds added each side of an event for the coordination-lag window only."""
+
+
+CARRIED_OVER = "carried over"
+"""The ``source`` of a window carried over from the other recording through the alignment, because
+this recording lacks a sensor its family's detector needs.  Against the trained recording's own
+windows in the June pair, carried-over windows overlap them by an IoU of 0.85-0.91 at the median,
+their boundaries 0.21-0.34 s apart: the same movement cut a little differently, so the editor marks
+them until they are checked."""
 
 
 KNEE_LAG_WINDOW_S = (2.0, 3.0)
@@ -219,8 +232,37 @@ def _quietness(window: tuple) -> dict:
     return {"stab_quiet_ratio": window[4], "stab_quiet_z": window[5]} if len(window) >= 6 else {}
 
 
-def _trunk_events(trials: dict[str, LoadedTrial], windows: dict[str, list[tuple]]) -> list[dict]:
-    """Numbered trunk events from per-role window lists of equal length."""
+def _mark_carried(window: dict, frm: str) -> dict:
+    """Mark a window as carried over from recording ``frm`` (:data:`CARRIED_OVER`)."""
+    window["source"] = {**window.get("source", {}), "event": CARRIED_OVER}
+    window["carried_from"] = frm
+    return window
+
+
+def carry_span(start: int, end: int, trials: dict[str, LoadedTrial], frm: str, to: str,
+               aligned: alignment.Alignment) -> tuple[int, int]:
+    """A window of recording ``frm`` carried onto ``to``'s clock by the alignment, in ``to``'s samples."""
+    source, target = trials[frm], trials[to]
+    carried = [sec_to_idx(float(aligned.map(index / source.fs, frm, to)), target.fs, target.n_samples)
+               for index in (start, end)]
+    first = int(np.clip(carried[0], 0, target.n_samples - 2))
+    return first, int(np.clip(carried[1], first + 1, target.n_samples - 1))
+
+
+def _settling_after(loaded: LoadedTrial, start: int, end: int, stab_params: detection.StabilizationParams,
+                    omega: detection.StabilizationDiagnostics) -> tuple[int, int, int, int, float, float]:
+    """A movement window with the stabilization window found after it, in the trunk detector's row layout."""
+    stab = detection.find_stabilization(loaded.kin, loaded.fs, end, stab_params, diagnostics=omega)
+    return start, end, stab.start, stab.end, round(stab.quiet_ratio, 3), round(stab.quiet_z, 3)
+
+
+def _trunk_events(trials: dict[str, LoadedTrial], windows: dict[str, list[tuple]],
+                  carried: dict[str, str] | None = None) -> list[dict]:
+    """Numbered trunk events from per-role window lists of equal length.
+
+    ``carried`` gives, per role whose windows were carried over, the role they
+    came from.
+    """
     labels = [label for label in roles(trials) if label in windows]
     count = min((len(windows[label]) for label in labels), default=0)
     events = []
@@ -229,6 +271,8 @@ def _trunk_events(trials: dict[str, LoadedTrial], windows: dict[str, list[tuple]
         for label in labels:
             window = windows[label][i]
             per_role[label] = _window_dict(*window[:4], fs=trials[label].fs, **_quietness(window))
+            if carried and label in carried:
+                _mark_carried(per_role[label], carried[label])
         events.append({"event_id": f"trunk-{i + 1:02d}", "enabled": True, "windows": per_role})
     return events
 
@@ -241,6 +285,8 @@ def detect_trunk_windows(
     """Detect trunk events, paired through the alignment when both recordings are selected.
 
     Each entry is ``(event_start, event_end, stab_start, stab_end, quiet_ratio, quiet_z)``.
+    Both recordings must have the trunk sensors (:func:`seed_trunk_events`
+    handles one without them).
     """
     if len(roles(trials)) == 2:
         novice, trained = trials["Novice"], trials["Trained"]
@@ -251,15 +297,15 @@ def detect_trunk_windows(
         return windows
 
     (label,) = roles(trials)
-    loaded = trials[label]
+    return {label: _single_trunk_windows(trials[label], trunk_params, stab_params)}
+
+
+def _single_trunk_windows(loaded: LoadedTrial, trunk_params: detection.TrunkDetectorParams,
+                          stab_params: detection.StabilizationParams) -> list[tuple]:
+    """One recording's strongest trunk rotations, each with its stabilization window."""
     events, _ = detection.detect_trunk_rotation_events(loaded.kin, loaded.fs, trunk_params)
     omega = detection.combined_omega(loaded.kin, loaded.fs, stab_params)
-    windows = []
-    for event in events:
-        stab = detection.find_stabilization(loaded.kin, loaded.fs, event.end, stab_params, diagnostics=omega)
-        windows.append((event.start, event.end, stab.start, stab.end,
-                        round(stab.quiet_ratio, 3), round(stab.quiet_z, 3)))
-    return {label: windows}
+    return [_settling_after(loaded, event.start, event.end, stab_params, omega) for event in events]
 
 
 def seed_trunk_events(
@@ -267,9 +313,36 @@ def seed_trunk_events(
     trunk_params: detection.TrunkDetectorParams | None = None,
     stab_params: detection.StabilizationParams | None = None,
 ) -> list[dict]:
-    return _trunk_events(trials, detect_trunk_windows(
-        trials, trunk_params or detection.TrunkDetectorParams(), stab_params or detection.StabilizationParams()
-    ))
+    """Trunk-rotation events of the selected recordings, paired where both have them.
+
+    A recording without the lumbar or chest sensor has no trunk-pelvis yaw to
+    find rotations in: it gets the other recording's rotations carried over
+    through the alignment, with its own stabilization windows after them.
+    """
+    trunk_params = trunk_params or detection.TrunkDetectorParams()
+    stab_params = stab_params or detection.StabilizationParams()
+    labels = roles(trials)
+    able = [label for label in labels if coverage.can_detect(trials[label].kin.sensors, "trunk")]
+    aligned = alignment.for_trials(trials)
+    if len(able) == len(labels) and (len(labels) == 1 or aligned is not None):
+        return _trunk_events(trials, detect_trunk_windows(trials, trunk_params, stab_params))
+
+    windows = {label: _single_trunk_windows(trials[label], trunk_params, stab_params) for label in able}
+    if len(able) == 1 and len(labels) == 2 and aligned is not None:
+        (source,) = able
+        (target,) = [label for label in labels if label != source]
+        loaded = trials[target]
+        omega = detection.combined_omega(loaded.kin, loaded.fs, stab_params)
+        windows[target] = [
+            _settling_after(loaded, *carry_span(row[0], row[1], trials, source, target, aligned), stab_params, omega)
+            for row in windows[source]
+        ]
+        return _trunk_events(trials, windows, carried={target: source})
+
+    # Two recordings that cannot be aligned: each keeps its own rotations, unpaired.
+    events = [event for label in able for event in _trunk_events(trials, {label: windows[label]})]
+    _sort_and_number(events, "trunk")
+    return events
 
 
 def detect_stance_windows(
@@ -319,6 +392,21 @@ def _span_s(window: dict, fs: float) -> tuple[float, float]:
     return window["event_start"] / fs, window["event_end"] / fs
 
 
+def _carried_stance(trials: dict[str, LoadedTrial], frm: str, to: str, window: dict, aligned: alignment.Alignment,
+                    stab_params: detection.StabilizationParams, omega: detection.StabilizationDiagnostics | None,
+                    v1: bool) -> dict:
+    """A stance window of ``frm`` carried onto ``to``, with ``to``'s own settling window after touch-down."""
+    loaded = trials[to]
+    start, end = carry_span(window["event_start"], window["event_end"], trials, frm, to, aligned)
+    if v1:
+        stab_start, stab_end = find_stabilization_v1(loaded.kin, loaded.fs, end)
+        return _mark_carried(_window_dict(start, end, stab_start, stab_end, fs=loaded.fs), frm)
+    stab = detection.find_stabilization(loaded.kin, loaded.fs, end, stab_params, diagnostics=omega)
+    return _mark_carried(_window_dict(start, end, stab.start, stab.end, fs=loaded.fs,
+                                      stab_quiet_ratio=round(stab.quiet_ratio, 3),
+                                      stab_quiet_z=round(stab.quiet_z, 3)), frm)
+
+
 def seed_knee_events(
     trials: dict[str, LoadedTrial],
     stab_params: detection.StabilizationParams | None = None,
@@ -341,6 +429,14 @@ def seed_knee_events(
     found = {label: detect_stance_windows(trials[label], knee_params, stab_params, omega[label], v1=v1)
              for label in labels}
     aligned = alignment.for_trials(trials)
+    able = [label for label in labels if coverage.can_detect(trials[label].kin.sensors, "knee", knee_params.method)]
+    if len(labels) == 2 and len(able) == 1 and aligned is not None:
+        # No thigh sensor: no lift index to find stances in, so the other recording's are carried over.
+        (source,) = able
+        (target,) = [label for label in labels if label != source]
+        found[target] = [(side, _carried_stance(trials, source, target, window, aligned, stab_params,
+                                                omega[target], v1))
+                         for side, window in found[source]]
 
     events: list[dict] = []
     for side in ("Left", "Right"):
@@ -394,10 +490,25 @@ def seed_smooth_events(
     for label in labels:
         points[label], diagnostics = detection.yaw_turning_points(trials[label].kin, trials[label].fs, segment_params)
         chest_yaw[label] = diagnostics.chest_yaw_deg
+    able = [label for label in labels if coverage.can_detect(trials[label].kin.sensors, "smooth")]
 
     events: list[dict] = []
     aligned = alignment.for_trials(trials)
-    if aligned is not None:
+    if aligned is not None and len(able) == 1:
+        # No chest sensor in one recording: the other's turns are carried over through the alignment.
+        (source,) = able
+        (target,) = [label for label in labels if label != source]
+        fs = trials[source].fs
+        for first, second in zip(points[source][:-1], points[source][1:]):
+            turn = detection.turn_between(first, second, chest_yaw[source], fs, segment_params)
+            if turn is None:
+                continue
+            start, end = carry_span(turn.start, turn.end, trials, source, target, aligned)
+            events.append({"event_id": "", "enabled": True, "direction": turn.direction, "windows": {
+                source: _movement_window_dict(turn.start, turn.end, fs=fs),
+                target: _mark_carried(_movement_window_dict(start, end, fs=trials[target].fs), source),
+            }})
+    elif aligned is not None and len(able) == 2:
         fs_n, fs_t = trials["Novice"].fs, trials["Trained"].fs
         matched = alignment.match_landmarks(
             aligned,
@@ -417,13 +528,14 @@ def seed_smooth_events(
             if windows:
                 events.append({"event_id": "", "enabled": True, "direction": int(direction), "windows": windows})
     else:
-        (label,) = labels
-        for first, second in zip(points[label][:-1], points[label][1:]):
-            turn = detection.turn_between(first, second, chest_yaw[label], trials[label].fs, segment_params)
-            if turn is not None:
-                events.append({"event_id": "", "enabled": True, "direction": turn.direction,
-                               "windows": {label: _movement_window_dict(turn.start, turn.end,
-                                                                        fs=trials[label].fs)}})
+        # One recording, or two that cannot be aligned: each cut on its own (none without a chest sensor).
+        for label in able:
+            for first, second in zip(points[label][:-1], points[label][1:]):
+                turn = detection.turn_between(first, second, chest_yaw[label], trials[label].fs, segment_params)
+                if turn is not None:
+                    events.append({"event_id": "", "enabled": True, "direction": turn.direction,
+                                   "windows": {label: _movement_window_dict(turn.start, turn.end,
+                                                                            fs=trials[label].fs)}})
 
     _sort_and_number(events, "smooth")
     return events
@@ -769,7 +881,9 @@ def _migrate_to_schema_2(session: dict, trials: dict[str, LoadedTrial]) -> list[
     detector.setdefault("knee_method", "knee_threshold" if str(detector.get("name", "")).startswith("v1") else "lift")
     trunk_params, stab_params, knee_params, segment_params = detection.params_from_dict(detector)
 
-    lift = {label: detection.lift_signal(loaded.kin, loaded.fs).lift_index for label, loaded in trials.items()}
+    lift = {label: diagnostics.lift_index for label, diagnostics in
+            ((label, detection.lift_signal(loaded.kin, loaded.fs)) for label, loaded in trials.items())
+            if diagnostics.available}
     for event in session.get("knee_events", []):
         votes = []
         for label, window in event.get("windows", {}).items():

@@ -26,7 +26,6 @@ One selection is *active* at a time.  It is remembered in
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import re
@@ -35,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from analysis import config, sensor_names
+from analysis.data_io import read_header
 
 SELECTION_PATH = config.OUTPUT_DIR / "selection.json"
 MAX_ID_LENGTH = 80
@@ -69,9 +69,7 @@ def recording_id(name: str) -> str:
 def _delsys_problem(path: Path) -> str | None:
     """Why a CSV is not a Delsys Trigno export the parser can read, or None."""
     try:
-        with path.open(newline="", encoding="utf-8", errors="replace") as handle:
-            reader = csv.reader(handle)
-            rows = [next(reader, []) for _ in range(9)]
+        rows, _, _ = read_header(path)
     except OSError as error:
         return f"cannot be read ({error.strerror})"
     channels = [cell.strip().lower() for cell in rows[5]]
@@ -146,6 +144,10 @@ class Recording:
     def naming_problems(self) -> list[str]:
         """What keeps :meth:`sensor_names` from being used; empty when stage 1 can run."""
         return sensor_names.problems(self.sensor_names(), self.sensor_labels())
+
+    def missing_sensors(self) -> list[str]:
+        """The analysis's sensors this recording has none of, by its current names: it runs without them."""
+        return sensor_names.absent(self.sensor_names(), self.sensor_labels())
 
     def _names_current(self, manifest: dict) -> bool:
         """Whether the outputs were computed with the sensor names in force now."""

@@ -28,6 +28,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from analysis.coverage import lift_stand_ins
 from analysis.data_io import ACC_COLUMNS, GYRO_COLUMNS, TrialData
 from analysis.kinematics import Kinematics
 from analysis.orientation import mounting_matrix
@@ -105,7 +106,7 @@ def linear_acceleration(
     ])
 
 
-def leg_lift_index(kin: Kinematics) -> np.ndarray:
+def leg_lift_index(kin: Kinematics, stand_in: bool = False) -> np.ndarray | None:
     """How much higher the left ankle is than the right, in thigh lengths.
 
     Each leg's vertical reach is the cosine of its thigh's tilt from vertical
@@ -116,8 +117,16 @@ def leg_lift_index(kin: Kinematics) -> np.ndarray:
     right.  This catches a lift whatever the knee does -- a kick with the knee
     extended included -- and says which leg is lifted, where knee flexion
     cannot tell a lifted leg from a deeply bent stance leg.
+
+    None if a thigh or shank is missing.  With ``stand_in``, a missing shank's
+    tilt is taken from its thigh (:func:`analysis.coverage.lift_stand_ins`):
+    good enough to place single-leg windows, not to report the index.
     """
+    stand_ins = lift_stand_ins(kin.sensors) if stand_in else None
+    if stand_ins is None and not kin.has("lthigh", "rthigh", "ltibia", "rtibia"):
+        return None
+
     def reach(thigh: str, shank: str) -> np.ndarray:
-        return up_in_body(kin, thigh)[:, 2] + up_in_body(kin, shank)[:, 2]
+        return up_in_body(kin, thigh)[:, 2] + up_in_body(kin, (stand_ins or {}).get(shank, shank))[:, 2]
 
     return reach("rthigh", "rtibia") - reach("lthigh", "ltibia")

@@ -16,15 +16,20 @@ Three families are analysed:
   first two these are not picked out of the recording but tile its moving passages, and they have no
   stabilization window.
 
+In the movement window of every family the **centre of mass** is measured as well — how much of the
+weight moves from one foot to the other, and how level and how low the centre of mass stays — from a
+segment model of the whole body built on the segments' tilts (see [Centre of mass](#centre-of-mass)).
+
 Every event of every family is paired with the same movement in the other recording through a
 whole-recording alignment, and the novice–trained comparison is made pair by pair
 (`paired_comparison.csv`).
 
-> **Metrics version 2.** The metric definitions were revised after an external review
-> ([Review.md](Review.md)), with every claim checked on the recordings (see
-> [What changed in version 2](#what-changed-in-version-2)). The numbers of the June write-up
-> (`docs/Tai Chi Balance Analysis.pdf`) are metrics version 1 and are reproduced by the git tag
-> `metrics-v1`.
+> **Metrics version 3.** Adds the centre of mass to every family; every column of version 2 is
+> unchanged (see [What changed in version 3](#what-changed-in-version-3)). Version 2 revised the
+> metric definitions after an external review ([docs/Review.md](docs/Review.md)), with every claim
+> checked on the recordings (see [What changed in version 2](#what-changed-in-version-2)). The
+> numbers of the June write-up (`docs/Tai Chi Balance Analysis.pdf`) are metrics version 1 and are
+> reproduced by the git tag `metrics-v1`.
 
 ## Quick start
 
@@ -57,7 +62,10 @@ chosen. Until you choose, the two recordings of the original study are selected 
 **Format.** Delsys Trigno Discover 2.0.1.3 CSV export: eight metadata rows, then one 12-column block
 per sensor (ACC X/Y/Z and GYRO X/Y/Z, each with its own time column). Sampling rate **370.3704 Hz**
 on every channel; ~240 s per recording. Sensor order differs between the two files, so the parser
-matches the sensors by their labels rather than their position.
+matches the sensors by their labels rather than their position. Trigno Discover writes numbers the
+way the computer's language settings do: the two files above use commas between values and decimal
+points, the later 2.1.1.0 exports (Dutch settings) semicolons and decimal commas. The parser reads
+which from the header (`data_io.read_header`).
 
 **Sensors (14).** Sternum (`chestbone`) and lower back (`lumbar`); left/right thigh, tibia and foot;
 left/right humerus, ulna and hand. Placement is documented in [docs/notes.txt](docs/notes.txt). The
@@ -164,8 +172,9 @@ before stage 1 each label is given one of those names (`analysis/sensor_names.py
   `Thigh` alone is not taken for either thigh. A suggestion is used only once it has been saved.
 - **Not used:** a sensor can be left out, for example a spare or an EMG sensor.
 
-Stage 1 runs only when every one of the 14 names has been given to exactly one sensor and no label is
-left undecided. The saved names are an input, like the session: they are kept in the recording's
+Stage 1 runs when no name has been given to two sensors and no label is left undecided. A name no
+sensor has is allowed: the recording lacks that sensor, and the analysis runs without it (see
+[Missing sensors](#missing-sensors)). The saved names are an input, like the session: they are kept in the recording's
 `sensor_names.json` and are meant to be committed. `recording.json` records the names each stage-1
 run used, so changing one marks the recording for stage 1 again, orientation filter included, since
 the assumed mounting depends on the name. Without the dashboard, `sensor_names.json` can be written by
@@ -175,6 +184,33 @@ The card's figure shows which label each spot on the body has been given, so a s
 or with two, stands out. Whether each sensor really was on that segment shows once it moves, on the
 Kinematics check page. Hovering a sensor on its stick figure names its label in the file, and the
 sensor table has a *recorded as* column.
+
+### Missing sensors
+
+A recording does not always have all 14 sensors: 15 of the 18 recordings added in September 2026
+have 13, without one hand or without the sternum. A missing sensor never stops the analysis. Every
+metric is measured as with all sensors, measured with a stand-in that the simulations showed does
+the job, or left empty (NaN), and every table keeps its columns. The rules are in
+`analysis/coverage.py`, and **[docs/missing_sensors.md](docs/missing_sensors.md)** lists, sensor by
+sensor, what is lost, how it is mitigated and why, with the numbers. In short:
+
+- **Stand-ins** for a metric's value are used only where they pass the "rule of ten": over the
+  curated windows of the complete June recordings, they move the metric by less than a tenth of its
+  interquartile range in 95 % of windows. A missing hand points along its forearm and a missing foot
+  moves with its shank in the centre of mass (every metric passes). A missing forearm or upper arm
+  keeps the weight transfer but not the centre-of-mass heights. Nothing stands in for the lumbar,
+  chest, thigh or shank sensors in a metric.
+- **Windows** whose detector needs the missing sensor (no chest: no trunk rotations or turns; no
+  thigh: no stances) are carried over from the other recording through the whole-recording
+  alignment and marked *carried over* in the editor until checked. Stabilization windows are placed
+  on the one trunk sensor there is, and the alignment uses the channels both recordings have.
+- **Where it shows:** the Sensor names card, the recalculation log, `sensor_coverage.csv` (per
+  recording and metric: measured, stand-in, or not calculated and why), the Kinematics check page
+  (missing rows, dashed bones) and the editor's subplot titles.
+
+A recording with all 14 sensors goes through none of this; its outputs are byte-identical to
+before. `python3 analysis/tools/missing_sensor_checks.py` re-runs every simulation the rules rest
+on.
 
 ### The kinematics check
 
@@ -232,8 +268,8 @@ Two switches in `analysis/config.py` change the results, and are shown on the Pi
 | constant | default | meaning |
 | --- | --- | --- |
 | `DETECTOR` | `"v2"` | detectors a new session is taken from when none is chosen — see [Event detection](#event-detection) |
-| `METRICS_VERSION` | `2` | the metric definitions in force; stamped into the session, every CSV and `metrics_provenance.json` |
-| `EXPORT_VERSION` | `2` | format of the 50 Hz export; an older one is rebuilt from the orientation cache, without filtering |
+| `METRICS_VERSION` | `3` | the metric definitions in force; stamped into the session, every CSV and `metrics_provenance.json` |
+| `EXPORT_VERSION` | `3` | format of the 50 Hz export; an older one is rebuilt from the orientation cache, without filtering |
 | `IGNORE_HIGH_PASS_FILTER` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
 
 `DEFAULT_RECORDINGS` sets what is selected before anything has been chosen; afterwards the choice
@@ -253,6 +289,7 @@ Standalone viewers in `analysis/tools/`. None is part of the pipeline, and all f
 | `python3 analysis/tools/plot_frame.py [npz] [--axis-scale S]` | plot one skeleton frame with local axis triads, to check sensor alignment |
 | `python3 analysis/tools/method_checks.py` | re-run the checks the method choices rest on, and print their numbers (see [Boundary robustness](#boundary-robustness)) |
 | `python3 analysis/tools/boundary_robustness.py [--jitter 0.25] [--replicates 20] [--seed 0]` | jitter every event boundary and report each metric's ICC |
+| `python3 analysis/tools/missing_sensor_checks.py [--novice FILE] [--trained FILE]` | remove each sensor in turn from two complete recordings and check every missing-sensor rule (see [Missing sensors](#missing-sensors)) |
 | `python3 analysis/tools/yt_download.py` | download the video at the URL in the script from YouTube (requires `yt-dlp`) |
 
 ---
@@ -370,7 +407,9 @@ and `recording` and `metrics_version` columns.
 | `trunk_pelvis_lag_s`, `trunk_pelvis_yaw_r` | event, padded 2 s each side | pelvis-to-chest turning lag (negative: the pelvis leads) and the correlation behind it |
 | `trunk_yaw_sparc` | event | smoothness of the trunk-on-pelvis turning speed; less negative is smoother |
 | `trunk_yaw_excursion_deg`, `trunk_yaw_peak_rate_dps` | event | how far and how fast the trunk turned on the pelvis |
-| `lumbar_ml_acc_rms_mps2`, `lumbar_ap_acc_rms_mps2` | post-rotation | mediolateral / anteroposterior sway: gravity-free lumbar acceleration in the pelvis-heading frame, RMS about the window mean |
+| `com_weight_transfer` | event | share of the body weight moved from one foot to the other during the rotation, 0–1 (see [Centre of mass](#centre-of-mass)); NaN when a foot is stepping for most of it |
+| `com_height_range_pct_height`, `com_lowering_pct_height` | event | how far the centre of mass rose and sank, and how far below upright standing it sat on average, in % of body height |
+| `lumbar_ml_acc_rms_mps2`, `lumbar_ap_acc_rms_mps2` | post-rotation | mediolateral / anteroposterior sway: gravity-free lumbar acceleration in the pelvis-heading frame, RMS about the window mean; it sees what moves faster than ~0.4 Hz, not a weight shift (see [Centre of mass](#centre-of-mass)) |
 | `lumbar_frontal_tilt_sd_deg`, `lumbar_sagittal_tilt_sd_deg` | post-rotation | sideways / forward-backward tilt spread of the pelvis, with no yaw in it |
 | `lumbar_rms_angular_velocity_dps` | post-rotation | overall lumbar angular activity, bias-corrected; needs no threshold |
 | `lumbar_corrective_peak_rate_hz` | post-rotation | angular-speed bursts per second above a recording-wide threshold — secondary: zero in most windows |
@@ -383,6 +422,7 @@ and `recording` and `metrics_version` columns.
 | `support_duration_s`, `peak_lift_index` | support | how long, and how high the foot went (thigh lengths) |
 | `peak_knee_flexion_deg`, `knee_extension_while_lifted_deg`, `peak_hip_flexion_deg` | support | what the lifted leg did; the extension is large for a kick |
 | `support_*` (`ml_acc_rms_mps2`, `ap_acc_rms_mps2`, `frontal_tilt_sd_deg`, `sagittal_tilt_sd_deg`, `rms_angular_velocity_dps`, `corrective_peak_rate_hz`) | support | balance on one foot: the sway, tilt and angular activity of the pelvis while the base of support is a single foot |
+| `support_com_height_range_pct_height`, `support_com_lowering_pct_height` | support | how far the centre of mass rose with the lifted leg, and its mean height relative to upright standing (negative: above it) — no weight transfer, all the weight being on one foot |
 | `settle_*` (the same) | after touch-down | settling |
 | `time_to_stabilization_s` | — | touch-down to the start of settling |
 | `lumbar_frontal_tilt_at_peak_deg` | highest lift | sideways pelvis tilt at the highest lift |
@@ -403,12 +443,106 @@ compared a knee lift with a kick.
 | `chest_pelvis_lag_s`, `chest_pelvis_yaw_r` | pelvis-to-chest turning lag and its correlation |
 | `chest_pelvis_gain` | pelvis turn ÷ chest turn; 1 = the trunk turns as a unit |
 | `relative_yaw_range_deg`, `relative_yaw_sd_deg` | how much axial twist opens up inside the turn |
+| `com_weight_transfer`, `com_height_range_pct_height`, `com_lowering_pct_height` | the weight moved between the feet, and the centre of mass's rise and depth, over the turn (see [Centre of mass](#centre-of-mass)) |
 | `chest_yaw_log10_dimensionless_jerk` | secondary, for comparability only (see below) |
 
 `sequence_summary.csv` gives per recording the number of turns and the median of each metric.
 Medians, not spreads: every turn is a different movement of the form, performed once, so the spread of
 a metric across turns describes the choreography rather than anyone's consistency. That is why the
 across-segment CV, SD and variance ratio of metrics version 1 are gone.
+
+### Centre of mass
+
+Shifting the weight is half of Tai Chi, so the movement window of every family also says what the
+centre of mass did (`analysis/com.py`, drawn in `centre_of_mass_figure.png`).
+
+**Why not the lumbar acceleration.** A weight shift of 10 cm over 4–8 s is a movement at 0.06–0.12 Hz.
+The 6-axis orientation filter cannot tell a horizontal acceleration that slow from a tilt and folds it
+into the orientation: a pure 10 cm translation put through the pipeline's own filter and gravity
+removal comes out with a gain of 0.003 at 0.1 Hz, 0.01 at 0.2 Hz and 0.05 at 0.3 Hz, against 0.90 at
+0.5 Hz. The AP and ML sway columns therefore measure what the pelvis does faster than ~0.4 Hz —
+corrections and jolts — and they stay where they are, in the stabilization windows: extended to the
+movement windows they would not have measured the weight shift.
+
+**The segment model.** What the filter does get right is each segment's tilt: a slow acceleration
+tilts the apparent vertical by a/g, about 0.5° here. So the centre of mass is built from the segments,
+the way a motion-capture system builds it: every segment's long axis from its orientation in one
+upright frame, chained from the hips to the ankles and up the trunk to the head and arms, with the
+segment masses and centres of mass of Winter (2009, Dempster's data) and segment lengths in proportion
+to body height (Drillis and Contini, in the same book). Positions are in body heights, so no
+participant height is needed, and the metrics are in % of height (1 % ≈ 1.7 cm at 1.70 m). The arms
+are included with their measured orientation; they are a tenth of the mass, and holding them hanging
+instead changes the weight index by 0.01–0.02 (median) and the height by up to 1.5 % of H — the arms
+being raised, which tilt alone measures. Headings are de-drifted as for the stick figure.
+
+Two signals come out of it:
+
+- **Height** above the floor, which is under the lower ankle. Only tilt enters a height, so heading
+  drift does not.
+- **Weight index**: where the centre of mass lies along the line from the left ankle (0) to the right
+  one (1) — by the lever rule, the share of the weight on the right foot. It needs no reference on the
+  ground, so stepping and the heading of the whole body do not enter it. It holds only with both feet
+  on the floor and at least hip-width apart. A foot counts as off the floor while the two ankles move
+  relative to each other as in a step — a peak above 0.1 body heights per second, walked out to 15 %
+  of the peak as the other detectors do (20–23 % of each recording) — which needs no foot sensor, so
+  the trained participant's loose right-foot sensor does not matter. With steps left out the index
+  strays more than 0.15 outside 0–1 for 0.1–0.5 % of the time, against 2–3.5 % with them.
+
+Checked against what has to hold:
+
+| check | novice | trained |
+| --- | --- | --- |
+| through each single-leg support the centre of mass is over the stance foot: index within this of 0 or 1 (median) | 0.03–0.06 | 0.06–0.08 |
+| with both feet still through a weight shift the two ankles' floors agree: median range | 1.27 % of H | 1.20 % of H |
+| symmetric standing, before and after the form: index | 0.49–0.51 | 0.33–0.41 |
+| neutral pose: centre of mass height (Winter's model) | 58.3 % of H | 58.3 % of H |
+
+Over each movement window: **`com_weight_transfer`** is the range of the weight index, clipped to 0–1,
+over the part with both feet down — 1 is a full shift from one foot to the other — reported when that
+part covers at least half the window; **`com_height_range_pct_height`** is how far the centre of mass
+rose and sank; **`com_lowering_pct_height`** its mean depth below the neutral pose. All three have an
+ICC of 0.97–1.00 against ±0.25 s boundary jitter.
+
+**What it is not.** Not an absolute horizontal position: in single-leg support the model puts the
+centre of mass about 3 % of H (novice) and 5–7.5 % (trained) from the stance ankle, mostly outside it,
+where it cannot be for seconds, because the stance leg reads as leaning further in than it does — the
+trained participant's left leg more than the right, which is why that recording's index reads
+0.33–0.41 in symmetric standing. An offset like that cancels in a transfer, which is a difference
+within one window. Nor an AP/ML path over the ground: anchored to the planted foot, the excursion
+measured from the left foot and from the right one disagrees by half its size where both stay down,
+so no such column is reported. The video-based body models planned next would give the full
+trajectory to check this against.
+
+On these recordings the trained performer moves more of the weight between the feet in all 4
+measurable trunk rotations (median 0.62 against 0.39 of the body weight) and in 13 of 16 turns (0.68
+against 0.58). Neither sits deep — both are 0.6–1.0 % of height (1–2 cm) below the neutral pose on
+median, with the knees bent 9–16° on median through the form — though the novice sits a little lower
+through every trunk rotation (0.5 % of H on median). How level the centre of mass stays does not
+differ consistently.
+
+#### Planned: the centre of mass from video (SMPL)
+
+The IMU model gives heights and the weight transfer between the feet, but not where the centre of
+mass is over the ground. The next step is to estimate it from video as well, by fitting the SMPL body
+model ([Loper et al. 2015](https://doi.org/10.1145/2816795.2818013)) to the recordings' video, frame by frame. The plan:
+
+1. **Fit SMPL to every frame.** Its shape parameters give the participant's own proportions and
+   height, so lengths no longer need to be proportions of height and results can be given in cm.
+2. **Compute the centre of mass from the fitted body**, either from the mesh volume or by assigning
+   its vertices to segments with Winter's masses, as `analysis/com.py` does, so the two models differ
+   only in where the segments are.
+3. **Synchronise video and IMU** on the sync movement at the start of each recording, the lumbar
+   acceleration peak the neutral-pose search already uses.
+4. **Compare on what both measure:** height, and the weight index from SMPL's ankle joints.
+5. **Check what only the video can give:** the absolute horizontal position (the 3–7.5 % of H offset
+   from the stance ankle in single-leg support), an AP/ML path over the ground, and the knees'
+   28–42° flexion-axis offset. Where the video agrees, the IMU model can be corrected or extended.
+
+Only one video exists so far: a sagittal view of the novice (`data/Anonymised_IMU_Trial_1_RC_Novice_Sag.mp4`).
+A single side view constrains depth poorly, and depth there is the mediolateral direction, where
+most of this form's weight shifts happen. A second, frontal camera for both participants would make
+the comparison meaningful. A video body model is itself an estimate: force plates remain the
+reference for where the weight is.
 
 ### Novice versus trained — `paired_comparison.csv`
 
@@ -417,8 +551,9 @@ performer's median, the median trained-minus-novice difference with its quartile
 pairs in which the trained value is the higher. It is descriptive — one participant per group, and
 consecutive events of one performance are not independent samples — so no p-values are given. On
 these recordings, for example, the trained performer's turns are smoother (higher SPARC) in 24 of 28
-matched turns of equal median duration, and their mediolateral sway during single-leg support is lower
-in all four stances.
+matched turns of equal median duration, their mediolateral sway during single-leg support is lower
+in all four stances, and they move more of the weight from one foot to the other in all 4 measurable
+trunk rotations and 13 of 16 turns.
 
 ### Why dimensionless jerk is secondary
 
@@ -444,9 +579,21 @@ which needs a second session. On the current session:
 | single-leg stance | `time_to_stabilization_s` | **0.51** — the gap between two boundaries: read with caution |
 | turns | duration, excursion, peak rate, lag, twist range | 0.99–1.00 |
 | turns | SPARC, gain, submovement rate | 0.90–0.97 |
+| all three | centre of mass: weight transfer, height range, lowering | 0.97–1.00 |
 
 `analysis/tools/method_checks.py` re-runs every check the method choices above rest on and prints the
 numbers quoted in this README.
+
+### What changed in version 3
+
+Version 3 adds and changes nothing else: the centre of mass over the movement window of every family —
+`com_weight_transfer`, `com_height_range_pct_height` and `com_lowering_pct_height` for the trunk
+rotations and the turns, the two height columns (`support_com_…`) for the single-leg support — their
+medians per recording in `sequence_summary.csv`, their rows in `paired_comparison.csv`, and
+`centre_of_mass_figure.png`. Recalculated from the same session, every version-2 column of every CSV
+comes out unchanged; only `metrics_version` reads 3. What it rests on is in
+[Centre of mass](#centre-of-mass), and `analysis/tools/method_checks.py` re-runs those checks, including
+the one that applies to version 2 as well: the sway columns cannot see a slow weight shift.
 
 ### What changed in version 2
 
@@ -513,10 +660,12 @@ still says where it came from.
 | `monopodal_stance_asymmetry_metrics.csv` | left-minus-right differences between mirrored stances |
 | `sequence_smoothness_metrics.csv`, `sequence_summary.csv` | per-turn metrics, and their medians per recording |
 | `recording_alignment.csv` | the novice-to-trained clock map at 1 Hz, for tracing any pair by hand |
+| `sensor_coverage.csv` | only when a selected recording lacks a sensor: per recording and metric, measured, stand-in, or not calculated and why, and which windows were carried over ([Missing sensors](#missing-sensors)) |
 | `trunk_traceability_figure.png` | trunk-rotation time series with the movement (rotation) and stabilization (post-rotation) bands, above the paired metrics grouped by the window they are computed on, each group on its band's colour |
 | `monopodal_stance_overview_figure.png` | lift index, knee flexion and pelvis tilt |
 | `monopodal_stance_traceability_figure.png` | the lift index with the movement (single-leg support) and stabilization (settling) bands, above the paired metrics grouped the same way |
 | `sequence_smoothness_figure.png` | the turns, their typical time course, and paired metrics |
+| `centre_of_mass_figure.png` | the centre of mass's height and the weight index over each recording, with every family's windows, above the paired centre-of-mass metrics per family |
 
 Recalculating (stage 4) rewrites the selection's CSVs, figures and `metrics_provenance.json`. Stage 1
 writes the recording folders, which do not depend on event windows.
@@ -536,16 +685,18 @@ analysis/
   signals.py              filtering, resampling, cross-correlation lag, index/time conversion
   orientation.py          quaternion algebra, Madgwick filter, sensor-mounting alignment
   sensor_names.py         which sensor in a recording is which: the analysis's names for the labels in a file
+  coverage.py             what a recording's sensors allow: which metric needs which sensor, the stand-ins
   recordings.py           the recordings in data/, the selection, and where their outputs go
   data_io.py              Delsys CSV parsing, sensor inventory, orientation cache, 50 Hz export
   kinematics.py           segment and joint angles; gyroscope bias and vertical reference; fast loading
   gravity.py              tilt, turning rate, gravity-free sway and leg lift, from each segment's vertical
   skeleton.py             the stick figure: its segments, and a pose from their orientations
   kinematics_check.py     the sensor check, joint-angle panels and moments of the Kinematics check page
+  com.py                  the whole-body centre of mass from a segment model: height, weight index, steps
   alignment.py            whole-recording DTW between the two recordings; event and landmark matching
   detection.py            v2 event detection (trunk, stance, turns, stabilization), pairing via the alignment
   detection_v1.py         original fixed-window detector and DTW matching (v1)
-  smoothness_metrics.py   smoothness and chest–pelvis coordination per turn
+  smoothness_metrics.py   smoothness, chest–pelvis coordination and the centre of mass per turn
   balance_metrics.py      trunk-rotation and single-leg-stance metrics, mirrored asymmetry
   comparison.py           novice versus trained, paired event by event
   figures.py              all output figures
@@ -567,6 +718,7 @@ data/                     recordings, any names, subfolders allowed (not in the 
 outputs/                  generated results: recordings/<recording>/ and analyses/<selection>/
 docs/
   user_manual.md          guide to using the event editor and interpreting its output
+  missing_sensors.md      per sensor: what the analysis does without it, how that is mitigated, and why
   notes.txt               sensor placement, calibration notes, metric rationale
   Implementation_strategy.md  planned nonlinear (Lyapunov) analysis — not yet implemented
   IMU sensor placement.pdf, Tai Chi Balance Analysis.{docx,pdf}, Technical Assignment.docx
@@ -583,8 +735,9 @@ used without the ones after it — nothing outside `dashboard/` depends on Dash.
 - **No magnetometer.** Absolute yaw is unobservable and drifts; only tilt and relative joint angles
   are reliable in that axis. Mitigation options — functional calibration, anatomical alignment, joint
   constraints — are discussed in [docs/notes.txt](docs/notes.txt).
-- **A recording needs all 14 sensors.** Every analysis name must be given to one of its sensors;
-  recordings with fewer sensors cannot be processed yet.
+- **Missing sensors reduce the analysis.** A recording without some of the 14 sensors is processed,
+  but the metrics that need them are empty, and the stand-ins and carried-over windows that replace
+  others were validated on two recordings only ([docs/missing_sensors.md](docs/missing_sensors.md)).
 - **Two participants, one trial each.** Differences between the novice and trained recordings are
   descriptive. No statistical inference about training effects is supported by this sample.
 - **Pairs rest on the whole-recording alignment**, which is only meaningful where the form is being
@@ -594,6 +747,15 @@ used without the ones after it — nothing outside `dashboard/` depends on Dash.
   across different events describes the choreography.
 - **Post-rotation windows are not quiet** (see [Stabilization](#stabilization)): read the trunk
   family's sway as the transition into the next movement.
+- **The sway columns are blind below ~0.3 Hz.** The orientation filter folds a horizontal acceleration
+  that slow into its tilt, so lumbar sway is what the pelvis does faster than ~0.4 Hz. Weight shifts
+  are measured by the centre of mass instead (see [Centre of mass](#centre-of-mass)).
+- **The centre of mass has no absolute horizontal position and no path over the ground.** In single-leg
+  support it comes out 3–7.5 % of height from the stance ankle, and the trained recording's weight
+  index carries an offset of about 0.15 toward the left foot; only changes within a window — the weight
+  transfer — and heights are reported. Segment lengths are proportions of height, not measured.
+  A body model fitted to video is planned to check both (see
+  [Planned: the centre of mass from video](#planned-the-centre-of-mass-from-video-smpl)).
 - **The trained participant's right-foot sensor moves while they stand still**: 17 °/s RMS in the
   stiller quiet span, against 2 °/s for the left foot. Its strap was loose or the foot moved, and its
   `sensor_check.csv` marks it. The novice's right foot is the stillest sensor of that recording. No

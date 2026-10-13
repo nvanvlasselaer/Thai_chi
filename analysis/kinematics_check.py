@@ -20,8 +20,9 @@ and drawn by :mod:`analysis.tools.plot_kinematics`:
   differently in Tai Chi.)
 
 Nothing here changes the analysis: a sensor marked ``check`` is for a person
-to look at.  Axes: x = right (mediolateral), y = forward (anteroposterior),
-z = up.
+to look at.  A sensor the recording lacks is listed as ``missing``, and the
+traces and moments that need it are left out (:mod:`analysis.coverage`).
+Axes: x = right (mediolateral), y = forward (anteroposterior), z = up.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.transform import Rotation
 
-from analysis import config
+from analysis import config, coverage
 from analysis.data_io import ACC_COLUMNS, GYRO_COLUMNS, TrialData
 from analysis.gravity import leg_lift_index, tilt_deg
 from analysis.kinematics import Kinematics
@@ -201,15 +202,23 @@ def sensor_check(kin: Kinematics, trial: TrialData, dedrifted: dict[str, Rotatio
             "status": "check" if checks else "ok",
             "notes": "; ".join(checks + notes),
         })
+    for sensor in coverage.missing(trial.sensors):
+        rows.append({"sensor": sensor, "recorded_as": "", "segment": config.SENSOR_MAP[sensor],
+                     "missing_values": np.nan, "status": "missing",
+                     "notes": "not in this recording: the analysis runs without it (docs/missing_sensors.md)"})
     return pd.DataFrame(rows)
 
 
 def summary(check: pd.DataFrame) -> str:
-    """One line for a status card: which sensors, if any, need a look."""
-    flagged = check[check.status == "check"]
-    if len(flagged) == 0:
-        return f"all {len(check)} sensors look as assumed"
-    return f"{len(flagged)} of {len(check)} sensors to check: " + ", ".join(flagged.sensor)
+    """One line for a status card: which sensors, if any, need a look, and which are missing."""
+    missing = check[check.status == "missing"]
+    present = check[check.status != "missing"]
+    flagged = present[present.status == "check"]
+    line = (f"all {len(present)} sensors look as assumed" if len(flagged) == 0 else
+            f"{len(flagged)} of {len(present)} sensors to check: " + ", ".join(flagged.sensor))
+    if len(missing):
+        line += f"; no {', '.join(missing.sensor)} sensor"
+    return line
 
 
 def summary_of(path: Path) -> str | None:
@@ -245,45 +254,46 @@ def axis_angle_deg(rotations: dict[str, Rotation], proximal: str, distal: str) -
 
 PANELS = (
     ("Trunk on pelvis (deg)", (
-        ("flexion-extension (x)", None, lambda k, fs, r: k.trunk_rel_euler_deg[:, 0]),
-        ("lateral bending (y)", None, lambda k, fs, r: k.trunk_rel_euler_deg[:, 1]),
-        ("axial rotation (z, de-drifted)", None, lambda k, fs, r: _hp(k.trunk_rel_euler_deg[:, 2], fs)),
+        ("flexion-extension (x)", None, lambda k, fs, r: k.trunk_rel_euler_deg[:, 0], ("lumbar", "chestbone")),
+        ("lateral bending (y)", None, lambda k, fs, r: k.trunk_rel_euler_deg[:, 1], ("lumbar", "chestbone")),
+        ("axial rotation (z, de-drifted)", None, lambda k, fs, r: _hp(k.trunk_rel_euler_deg[:, 2], fs),
+         ("lumbar", "chestbone")),
     )),
     ("Pelvis tilt against gravity (deg)", (
-        ("sagittal", None, lambda k, fs, r: tilt_deg(k, "lumbar")[0]),
-        ("frontal", None, lambda k, fs, r: tilt_deg(k, "lumbar")[1]),
+        ("sagittal", None, lambda k, fs, r: tilt_deg(k, "lumbar")[0], ("lumbar",)),
+        ("frontal", None, lambda k, fs, r: tilt_deg(k, "lumbar")[1], ("lumbar",)),
     )),
     ("Hip flexion-extension (x, deg; flexion > 0)", (
-        ("left", LEFT, lambda k, fs, r: k.left_hip_deg[:, 0]),
-        ("right", RIGHT, lambda k, fs, r: k.right_hip_deg[:, 0]),
+        ("left", LEFT, lambda k, fs, r: k.left_hip_deg[:, 0], ("lumbar", "lthigh")),
+        ("right", RIGHT, lambda k, fs, r: k.right_hip_deg[:, 0], ("lumbar", "rthigh")),
     )),
     ("Hip ab/adduction (y, deg; abduction > 0, right side mirrored)", (
-        ("left", LEFT, lambda k, fs, r: k.left_hip_deg[:, 1]),
-        ("right", RIGHT, lambda k, fs, r: -k.right_hip_deg[:, 1]),
+        ("left", LEFT, lambda k, fs, r: k.left_hip_deg[:, 1], ("lumbar", "lthigh")),
+        ("right", RIGHT, lambda k, fs, r: -k.right_hip_deg[:, 1], ("lumbar", "rthigh")),
     )),
     ("Knee flexion-extension (x, deg; flexion < 0)", (
-        ("left", LEFT, lambda k, fs, r: k.left_knee_deg[:, 0]),
-        ("right", RIGHT, lambda k, fs, r: k.right_knee_deg[:, 0]),
+        ("left", LEFT, lambda k, fs, r: k.left_knee_deg[:, 0], ("lthigh", "ltibia")),
+        ("right", RIGHT, lambda k, fs, r: k.right_knee_deg[:, 0], ("rthigh", "rtibia")),
     )),
     ("Ankle (x, deg; dorsiflexion > 0)", (
-        ("left", LEFT, lambda k, fs, r: k.left_ankle_deg[:, 0]),
-        ("right", RIGHT, lambda k, fs, r: k.right_ankle_deg[:, 0]),
+        ("left", LEFT, lambda k, fs, r: k.left_ankle_deg[:, 0], ("ltibia", "lfoot")),
+        ("right", RIGHT, lambda k, fs, r: k.right_ankle_deg[:, 0], ("rtibia", "rfoot")),
     )),
     ("Leg lift (thigh lengths, + left foot up)", (
-        ("lift index", None, lambda k, fs, r: leg_lift_index(k)),
+        ("lift index", None, lambda k, fs, r: leg_lift_index(k), coverage.LEGS),
     )),
     ("Shoulder elevation: upper arm from the trunk's axis (deg)", (
-        ("left", LEFT, lambda k, fs, r: axis_angle_deg(r, "chestbone", "lhumerus")),
-        ("right", RIGHT, lambda k, fs, r: axis_angle_deg(r, "chestbone", "rhumerus")),
+        ("left", LEFT, lambda k, fs, r: axis_angle_deg(r, "chestbone", "lhumerus"), ("chestbone", "lhumerus")),
+        ("right", RIGHT, lambda k, fs, r: axis_angle_deg(r, "chestbone", "rhumerus"), ("chestbone", "rhumerus")),
     )),
     ("Elbow bend: angle between upper arm and forearm (deg)", (
-        ("left", LEFT, lambda k, fs, r: axis_angle_deg(r, "lhumerus", "lulna")),
-        ("right", RIGHT, lambda k, fs, r: axis_angle_deg(r, "rhumerus", "rulna")),
+        ("left", LEFT, lambda k, fs, r: axis_angle_deg(r, "lhumerus", "lulna"), ("lhumerus", "lulna")),
+        ("right", RIGHT, lambda k, fs, r: axis_angle_deg(r, "rhumerus", "rulna"), ("rhumerus", "rulna")),
     )),
 )
-"""The panels of the joint-angle view: a title, and per trace a label, a side
-and the signal, from the kinematics, the sampling rate and
-:func:`dedrifted_rotations`.
+"""The panels of the joint-angle view: a title, and per trace a label, a side,
+the signal, from the kinematics, the sampling rate and
+:func:`dedrifted_rotations`, and the sensors it needs.
 
 Leg and trunk joint angles are the analysis' own: the distal segment's Euler
 angles relative to the proximal one, without the axial (z) component, where
@@ -301,16 +311,29 @@ clean elbow flexion."""
 def panel_series(
     kin: Kinematics, fs: float, target_fs: float = 50.0, dedrifted: dict[str, Rotation] | None = None
 ) -> tuple[np.ndarray, list[dict]]:
-    """Every panel's traces resampled to ``target_fs``: ``(time, [{title, traces: [(label, side, values)]}])``."""
+    """Every panel's traces resampled to ``target_fs``: ``(time, [{title, traces: [(label, side, values)]}])``.
+
+    A trace whose sensors the recording lacks is left out, and the panel's
+    title says so.
+    """
     if dedrifted is None:
         dedrifted = dedrifted_rotations(kin, fs)
-    time = None
+    time, _ = resample_filtered_full(kin.t, kin.t, fs, target_fs)
     panels = []
     for title, traces in PANELS:
-        resampled = []
-        for label, side, signal in traces:
+        resampled, absent, lacking = [], [], []
+        for label, side, signal, sensors in traces:
+            if not kin.has(*sensors):
+                gone = [sensor for sensor in sensors if not kin.has(sensor)]
+                absent.append(f"{label} (no {', '.join(gone)})")
+                lacking += [sensor for sensor in gone if sensor not in lacking]
+                continue
             time, values = resample_filtered_full(kin.t, signal(kin, fs, dedrifted), fs, target_fs)
             resampled.append((label, side, values))
+        if absent and not resampled:
+            title = f"{title}  [not recorded: no {', '.join(lacking)} sensor]"
+        elif absent:
+            title = f"{title}  [not recorded: {'; '.join(absent)}]"
         panels.append({"title": title, "traces": resampled})
     return time, panels
 
@@ -325,20 +348,27 @@ def check_moments(kin: Kinematics, fs: float) -> list[tuple[str, float]]:
 
     At the neutral pose the figure must stand upright; at each leg's deepest
     knee bend and highest foot lift that leg, and only that one, must bend or
-    rise; at the largest trunk turns the chest must turn on the pelvis.
+    rise; at the largest trunk turns the chest must turn on the pelvis.  A
+    moment whose sensors the recording lacks is left out; with a shank
+    missing, the highest lifts are found with its thigh standing in.
     """
     start, end = kin.calibration.neutral
     moments = [("neutral pose: standing upright", 0.5 * (start + end) / fs)]
-    lift = lowpass_signal(leg_lift_index(kin), fs, cutoff_hz=2.0)
     for side, angles in ((LEFT, kin.left_knee_deg), (RIGHT, kin.right_knee_deg)):
+        if not kin.has(f"{side[0].lower()}thigh", f"{side[0].lower()}tibia"):
+            continue
         knee = np.abs(lowpass_signal(angles[:, 0], fs, cutoff_hz=6.0))
         moments.append((f"deepest {side.lower()} knee bend: the {side.lower()} knee bent",
                         float(np.argmax(knee)) / fs))
-    moments.append(("highest left-foot lift: the left leg up", float(np.argmax(lift)) / fs))
-    moments.append(("highest right-foot lift: the right leg up", float(np.argmin(lift)) / fs))
-    twist = lowpass_signal(_hp(kin.trunk_rel_euler_deg[:, 2], fs), fs, cutoff_hz=2.0)
-    moments.append(("largest trunk turn one way", float(np.argmax(twist)) / fs))
-    moments.append(("largest trunk turn the other way", float(np.argmin(twist)) / fs))
+    index = leg_lift_index(kin, stand_in=True)
+    if index is not None:
+        lift = lowpass_signal(index, fs, cutoff_hz=2.0)
+        moments.append(("highest left-foot lift: the left leg up", float(np.argmax(lift)) / fs))
+        moments.append(("highest right-foot lift: the right leg up", float(np.argmin(lift)) / fs))
+    if kin.has("lumbar", "chestbone"):
+        twist = lowpass_signal(_hp(kin.trunk_rel_euler_deg[:, 2], fs), fs, cutoff_hz=2.0)
+        moments.append(("largest trunk turn one way", float(np.argmax(twist)) / fs))
+        moments.append(("largest trunk turn the other way", float(np.argmin(twist)) / fs))
     return moments
 
 

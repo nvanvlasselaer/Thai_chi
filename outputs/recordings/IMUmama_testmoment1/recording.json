@@ -1,0 +1,46 @@
+{
+  "source": {
+    "file": "IMUmama_testmoment1.csv",
+    "size": 128579011,
+    "mtime_ns": 1791373780000000000,
+    "sha256": "43a3c3648944c667b85790954f0d6338bd053fe3210f1a719f2dd706eb9ac75d"
+  },
+  "fs_hz": 370.3704,
+  "n_samples": 71760,
+  "duration_s": 193.749,
+  "sensors": [
+    "lulna",
+    "rhand",
+    "rhumerus",
+    "lhumerus",
+    "rulna",
+    "lhand",
+    "chestbone",
+    "lumbar",
+    "lthigh",
+    "rthigh",
+    "ltibia",
+    "rtibia",
+    "lfoot",
+    "rfoot"
+  ],
+  "sensor_names": {
+    "Avanti Sensor 0 (84551)": "lulna",
+    "Avanti Sensor 1 (84494)": "rhand",
+    "Avanti Sensor 2 (84625)": "rhumerus",
+    "Avanti Sensor 3 (84483)": "lhumerus",
+    "Avanti Sensor 4 (84642)": "rulna",
+    "Avanti Sensor 5 (84450)": "lhand",
+    "Avanti Sensor 7 (84663)": "chestbone",
+    "Avanti Sensor 8 (84573)": "lumbar",
+    "Avanti Sensor 9 (84570)": "lthigh",
+    "Avanti Sensor 10 (84624)": "rthigh",
+    "Avanti Sensor 11 (84492)": "ltibia",
+    "Avanti Sensor 12 (84607)": "rtibia",
+    "Avanti Sensor 13 (84643)": "lfoot",
+    "Avanti Sensor 14 (84644)": "rfoot"
+  },
+  "export_version": 3,
+  "processed_utc": "2026-10-07T17:51:41+00:00",
+  "processed_local": "07 Oct 2026 19:51"
+}

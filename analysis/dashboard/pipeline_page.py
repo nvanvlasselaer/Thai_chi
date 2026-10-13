@@ -42,6 +42,8 @@ def recording_options() -> list[dict]:
         size = f"{recording.size / 1e6:.0f} MB"
         if recording.usable:
             note = "sensors to name" if recording.naming_problems() else CACHE_NOTE[recording.cache_state()[0]]
+            if not recording.naming_problems() and recording.missing_sensors():
+                note += f"  ·  no {', '.join(recording.missing_sensors())}"
             options.append({"label": f"{recording.name}  ·  {size}  ·  {note}", "value": recording.name})
         else:
             options.append({"label": f"{recording.name}  ·  {recording.problem}", "value": recording.name,
@@ -76,7 +78,8 @@ def _stages() -> list[tuple]:
          "Which sensor in each recording is which. The analysis knows its 14 sensors by fixed names, which "
          "decide how each is assumed to sit on the body. Where a label in the file spells one of them it is "
          "used as it is; otherwise a name is suggested -- from what the label reads as, or from the name "
-         "the same serial number has in another recording -- and used once saved here.",
+         "the same serial number has in another recording -- and used once saved here. A recording may "
+         "lack some of the 14: the analysis then runs without them (docs/missing_sensors.md).",
          [names_card.layout()]),
         ("preprocess", "1", "Orientation and kinematics",
          "Parse each selected recording and run the Madgwick orientation filter on every sensor, in "

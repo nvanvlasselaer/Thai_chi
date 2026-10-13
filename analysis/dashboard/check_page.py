@@ -30,7 +30,7 @@ from plotly.subplots import make_subplots
 from analysis import kinematics_check
 from analysis.config import SENSOR_MAP, TRIALS
 from analysis.dashboard.state import workspace
-from analysis.skeleton import CONNECTIONS, SEGMENTS, pose, sensor_positions
+from analysis.skeleton import CONNECTIONS, SEGMENTS, pose, sensor_positions, unmeasured
 
 DISPLAY_FS = 25.0
 """Rate everything on this page is drawn at: plenty for movements this slow."""
@@ -84,7 +84,7 @@ def prepared(label: str | None) -> dict | None:
     loaded = trials.get(label) if label else None
     if loaded is None:
         return None
-    key = loaded.recording.sha256()
+    key = (loaded.recording.sha256(), tuple(sorted(loaded.kin.sensors)))
     if key not in _prepared:
         kin, fs = loaded.kin, loaded.fs
         rotations = kinematics_check.dedrifted_rotations(kin, fs)
@@ -144,11 +144,17 @@ def skeleton_figure(data: dict, time_s: float, options: list[str], view: str = "
         x, y, z = _lines([(rest[a], rest[b]) for a, b in CONNECTIONS])
         figure.add_trace(go.Scatter3d(x=x, y=y, z=z, mode="lines", hoverinfo="skip",
                                       line={"color": "#cccccc", "width": 4}, name="neutral pose"))
+    # A bone whose sensor the recording lacks is drawn faint and dashed: it only follows its neighbour.
+    absent = unmeasured(data["recorded_as"])
     for side, colour in (("centre", CENTRE_COLOUR), ("left", LEFT_COLOUR), ("right", RIGHT_COLOUR)):
-        bones = [(positions[a], positions[b]) for a, b in CONNECTIONS if _side(b) == side]
+        bones = [(positions[a], positions[b]) for a, b in CONNECTIONS if _side(b) == side and b not in absent]
         x, y, z = _lines(bones)
         figure.add_trace(go.Scatter3d(x=x, y=y, z=z, mode="lines", hoverinfo="skip",
                                       line={"color": colour, "width": 7}, name=side))
+    if absent:
+        x, y, z = _lines([(positions[a], positions[b]) for a, b in CONNECTIONS if b in absent])
+        figure.add_trace(go.Scatter3d(x=x, y=y, z=z, mode="lines", hoverinfo="skip", name="no sensor",
+                                      line={"color": "#b0b0b0", "width": 5, "dash": "dash"}))
     joints = list(positions)
     figure.add_trace(go.Scatter3d(
         x=[float(positions[j][0]) for j in joints], y=[float(positions[j][1]) for j in joints],

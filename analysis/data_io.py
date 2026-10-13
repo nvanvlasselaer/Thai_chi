@@ -47,6 +47,35 @@ class TrialData:
     """Each sensor's label in the file, by the name the analysis gives it."""
 
 
+HEADER_ROWS = 8
+"""Rows of metadata above the samples in a Delsys export."""
+SEPARATORS = (",", ";", "\t")
+
+
+def read_header(path: Path) -> tuple[list[list[str]], str, str]:
+    """The header rows of a Delsys export split into cells, and its ``(separator, decimal mark)``.
+
+    Trigno Discover writes numbers the way the computer's language settings
+    do: ``0.0027, 0.1245`` on an English one, ``0,0027; 0,1245`` on a Dutch or
+    French one.  The separator is the one the channel-name row (row 6) is split
+    by, since its cells hold none of them; the decimal mark is a comma only
+    where the separator is not, and the duration or sampling rate is written
+    with one.
+    """
+    with path.open(newline="", encoding="utf-8", errors="replace") as handle:
+        lines = [handle.readline() for _ in range(HEADER_ROWS)]
+    separator = max(SEPARATORS, key=lines[5].count)
+    reader = csv.reader(lines, delimiter=separator)
+    rows = [next(reader, []) for _ in range(HEADER_ROWS)]
+    decimal = "," if separator != "," and re.search(r"\d,\d", lines[2] + lines[6]) else "."
+    return rows, separator, decimal
+
+
+def header_number(text: str, decimal: str) -> float:
+    """A number written in a header cell, ``"370,3704 Hz"`` or ``"370.3704 Hz"`` -> 370.3704."""
+    return float(re.sub(r"[^\d.\-]", "", text.replace(decimal, ".")))
+
+
 def canonical_sensor(name: str) -> str:
     stem = re.sub(r"\s*\(\d+\)\s*$", "", name.strip())
     return stem.lower().replace("_", "")
@@ -56,7 +85,8 @@ def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = 
     """Parse a Delsys Trigno Discover CSV export.
 
     Eight metadata rows, then one 12-column block per sensor (ACC X/Y/Z and
-    GYRO X/Y/Z, each with its own time column).  Sensor order differs between
+    GYRO X/Y/Z, each with its own time column), with commas or semicolons
+    between the values (:func:`read_header`).  Sensor order differs between
     recordings, so blocks are matched by name rather than position.
 
     ``names`` maps each sensor label in the file (``L_humerus (84483)``) to the
@@ -65,10 +95,9 @@ def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = 
     its lower-case letters, which is what the labels of the first recordings
     spell.
     """
-    with path.open(newline="") as f:
-        rows = [next(csv.reader(f)) for _ in range(9)]
+    rows, separator, decimal = read_header(path)
 
-    duration_meta_s = float(rows[2][1].strip())
+    duration_meta_s = header_number(rows[2][1], decimal)
     sensor_row = rows[3]
     channel_row = rows[5]
     fs_row = rows[6]
@@ -83,11 +112,11 @@ def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = 
 
     block_fs = []
     for start in sensor_starts:
-        hz_text = fs_row[start + 1].strip()
-        block_fs.append(float(hz_text.replace("Hz", "").strip()))
+        block_fs.append(header_number(fs_row[start + 1], decimal))
     fs = float(np.median(block_fs))
 
-    raw = pd.read_csv(path, skiprows=8, header=None, usecols=range(n_sensor_cols), low_memory=False)
+    raw = pd.read_csv(path, skiprows=HEADER_ROWS, header=None, sep=separator, decimal=decimal,
+                      usecols=range(n_sensor_cols), low_memory=False)
     raw = raw.apply(pd.to_numeric, errors="coerce")
 
     data: dict[str, pd.DataFrame] = {}
@@ -188,21 +217,27 @@ def save_kinematic_variables(path: Path, kin: Kinematics, fs: float, target_fs: 
     components are gravity-referenced and exported as they are, and the
     angular speeds have the gyroscope bias removed.  Axes: x = mediolateral,
     y = anteroposterior, z = vertical (:func:`analysis.orientation.mounting_matrix`).
+
+    A channel whose sensor the recording lacks is left empty (NaN), so every
+    export has the same columns.
     """
 
     def detrended(signal: np.ndarray) -> np.ndarray:
         return highpass_detrend(signal, fs, cutoff_hz=0.05)
 
+    empty = np.full(len(kin.t), np.nan)
+    eulers = {sensor: kin.eulers_deg.get(sensor, np.full((len(kin.t), 3), np.nan)) for sensor in ("lumbar", "chestbone")}
+    omega = {sensor: kin.omega_mag.get(sensor, empty) for sensor in ("lumbar", "chestbone")}
     channels = {
         "trunk_pelvis_x_deg": kin.trunk_rel_euler_deg[:, 0],
         "trunk_pelvis_y_deg": kin.trunk_rel_euler_deg[:, 1],
         "trunk_pelvis_z_deg": detrended(kin.trunk_rel_euler_deg[:, 2]),
-        "lumbar_x_deg": kin.eulers_deg["lumbar"][:, 0],
-        "lumbar_y_deg": kin.eulers_deg["lumbar"][:, 1],
-        "lumbar_z_deg": detrended(kin.eulers_deg["lumbar"][:, 2]),
-        "chest_z_deg": detrended(kin.eulers_deg["chestbone"][:, 2]),
-        "lumbar_omega_dps": kin.omega_mag["lumbar"],
-        "chest_omega_dps": kin.omega_mag["chestbone"],
+        "lumbar_x_deg": eulers["lumbar"][:, 0],
+        "lumbar_y_deg": eulers["lumbar"][:, 1],
+        "lumbar_z_deg": detrended(eulers["lumbar"][:, 2]),
+        "chest_z_deg": detrended(eulers["chestbone"][:, 2]),
+        "lumbar_omega_dps": omega["lumbar"],
+        "chest_omega_dps": omega["chestbone"],
     }
     for joint in EXPORTED_JOINTS:
         angles = getattr(kin, f"{joint}_deg")

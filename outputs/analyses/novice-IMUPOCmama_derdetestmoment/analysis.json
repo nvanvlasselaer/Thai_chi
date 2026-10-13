@@ -1,0 +1,12 @@
+{
+  "analysis": "novice-IMUPOCmama_derdetestmoment",
+  "recordings": {
+    "Novice": {
+      "file": "IMUPOCmama_derdetestmoment.csv",
+      "id": "IMUPOCmama_derdetestmoment",
+      "size": 143007869,
+      "sha256": "ae05fcc87c9ee3e24b4db3876022f77037fca487130e42c30b48629efea1363c"
+    }
+  },
+  "written_utc": "2026-10-07T16:32:56+00:00"
+}

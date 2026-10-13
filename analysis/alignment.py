@@ -18,6 +18,12 @@ trained partner.  On these recordings the offset is almost constant, about
 
 The ends are left free, so neither recording has to start or stop at the same
 point of the form, and the quiet standing either side does not bend the map.
+
+When a sensor is missing in either recording, the channels that need it are
+left out of both, and pelvis yaw carries the turns when the chest is missing
+(:func:`channels_for`).  Simulated on the June pair, every reduced set kept all
+38 curated pairs the same movement; without the chest the map stays within
+0.6 s of the full one at the 95th percentile.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from analysis.coverage import has
 from analysis.kinematics import LoadedTrial
 from analysis.signals import highpass_detrend, lowpass_signal
 
@@ -55,6 +62,8 @@ class Alignment:
     cost: float
     """Mean distance per step along the path, in z-scored channel units."""
     params: AlignmentParams
+    channels: tuple[str, ...] = ()
+    """The channels matched on (:func:`channels_for`); empty means all of :data:`FULL_CHANNELS`."""
 
     def to_trained(self, t: float | np.ndarray) -> float | np.ndarray:
         return np.interp(t, self.novice_s, self.trained_s)
@@ -76,10 +85,49 @@ class Alignment:
     def digest(self) -> str:
         payload = {"params": asdict(self.params), "cost": round(self.cost, 6),
                    "map": np.round(self.trained_s[:: int(self.params.fs_hz)], 3).tolist()}
+        if self.channels and self.channels != FULL_CHANNELS:
+            payload["channels"] = list(self.channels)
         return hashlib.sha256(json.dumps(payload).encode()).hexdigest()[:16]
 
 
-def alignment_features(loaded: LoadedTrial, params: AlignmentParams) -> tuple[np.ndarray, np.ndarray]:
+CHANNEL_SENSORS = {
+    "chest yaw": ("chestbone",),
+    "trunk-pelvis yaw": ("lumbar", "chestbone"),
+    "left knee": ("lthigh", "ltibia"),
+    "right knee": ("rthigh", "rtibia"),
+    "pelvis yaw": ("lumbar",),
+}
+FULL_CHANNELS = ("chest yaw", "trunk-pelvis yaw", "left knee", "right knee")
+"""The channels matched on when both recordings have every sensor."""
+
+
+def channels_for(*sensor_sets) -> tuple[str, ...]:
+    """The channels every recording can provide, in :data:`FULL_CHANNELS` order.
+
+    Pelvis yaw carries the turns instead of the chest yaw when a recording has
+    no chest sensor: on the June pair that keeps the map within 0.6 s of the
+    full one (95th percentile), against 1.0 s on the knees alone.
+    """
+    common = set.intersection(*(set(sensors) for sensors in sensor_sets))
+    chosen = [name for name in FULL_CHANNELS if has(common, *CHANNEL_SENSORS[name])]
+    if "chest yaw" not in chosen and has(common, *CHANNEL_SENSORS["pelvis yaw"]):
+        chosen.insert(0, "pelvis yaw")
+    return tuple(chosen)
+
+
+def _channel(kin, fs: float, name: str, params: AlignmentParams) -> tuple[np.ndarray, float]:
+    if name == "chest yaw":
+        return highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs), params.yaw_cutoff_hz
+    if name == "trunk-pelvis yaw":
+        return highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs), params.yaw_cutoff_hz
+    if name == "pelvis yaw":
+        return highpass_detrend(kin.eulers_deg["lumbar"][:, 2], fs), params.yaw_cutoff_hz
+    knee = kin.left_knee_deg if name == "left knee" else kin.right_knee_deg
+    return knee[:, 0], params.knee_cutoff_hz
+
+
+def alignment_features(loaded: LoadedTrial, params: AlignmentParams,
+                       channels: tuple[str, ...] = FULL_CHANNELS) -> tuple[np.ndarray, np.ndarray]:
     """The channels the recordings are matched on, z-scored, on a uniform grid.
 
     Chest yaw and trunk-pelvis yaw carry the turns of the form, both knees the
@@ -87,15 +135,9 @@ def alignment_features(loaded: LoadedTrial, params: AlignmentParams) -> tuple[np
     the low cutoffs keep only the choreography, not how each person executes it.
     """
     kin, fs = loaded.kin, loaded.fs
-    channels = [
-        (highpass_detrend(kin.eulers_deg["chestbone"][:, 2], fs), params.yaw_cutoff_hz),
-        (highpass_detrend(kin.trunk_rel_euler_deg[:, 2], fs), params.yaw_cutoff_hz),
-        (kin.left_knee_deg[:, 0], params.knee_cutoff_hz),
-        (kin.right_knee_deg[:, 0], params.knee_cutoff_hz),
-    ]
     grid = np.arange(kin.t[0], kin.t[-1], 1.0 / params.fs_hz)
     columns = []
-    for signal, cutoff in channels:
+    for signal, cutoff in (_channel(kin, fs, name, params) for name in channels):
         values = np.interp(grid, kin.t, lowpass_signal(signal, fs, cutoff_hz=cutoff))
         spread = np.std(values)
         columns.append((values - np.mean(values)) / (spread if spread > 0 else 1.0))
@@ -138,11 +180,15 @@ def dtw_path(a: np.ndarray, b: np.ndarray, band: int, free: int) -> tuple[np.nda
     return path, float(total / max(1, len(path)))
 
 
-def align(novice: LoadedTrial, trained: LoadedTrial, params: AlignmentParams | None = None) -> Alignment:
-    """Warp the novice recording onto the trained one (about 0.2 s)."""
+def align(novice: LoadedTrial, trained: LoadedTrial, params: AlignmentParams | None = None,
+          channels: tuple[str, ...] | None = None) -> Alignment:
+    """Warp the novice recording onto the trained one (about 0.2 s), on the channels both have."""
     params = params or AlignmentParams()
-    grid_n, features_n = alignment_features(novice, params)
-    grid_t, features_t = alignment_features(trained, params)
+    channels = channels or channels_for(novice.kin.sensors, trained.kin.sensors)
+    if not channels:
+        raise ValueError("The two recordings share no sensor the alignment can use.")
+    grid_n, features_n = alignment_features(novice, params, channels)
+    grid_t, features_t = alignment_features(trained, params, channels)
     band = int(params.band_frac * max(len(grid_n), len(grid_t)))
     free = int(params.free_end_s * params.fs_hz)
     path, mean_cost = dtw_path(features_n, features_t, band, free)
@@ -158,24 +204,28 @@ def align(novice: LoadedTrial, trained: LoadedTrial, params: AlignmentParams | N
     end_offset = novice_s[-1] - trained_s[-1]
     novice_s = np.concatenate([[grid_n[0] - 1e3], novice_s, [grid_n[-1] + 1e3]])
     trained_s = np.concatenate([[grid_n[0] - 1e3 - start_offset], trained_s, [grid_n[-1] + 1e3 - end_offset]])
-    return Alignment(novice_s=novice_s, trained_s=trained_s, cost=mean_cost, params=params)
+    return Alignment(novice_s=novice_s, trained_s=trained_s, cost=mean_cost, params=params,
+                     channels=() if channels == FULL_CHANNELS else channels)
 
 
 _cache: dict[tuple, Alignment] = {}
 
 
 def for_trials(trials: dict[str, LoadedTrial], params: AlignmentParams | None = None) -> Alignment | None:
-    """The alignment of the two loaded recordings, or None with fewer than two.
+    """The alignment of the two loaded recordings, or None with fewer than two or no channel in common.
 
-    Cached per process by the two files' content, so the dashboard, the
-    seeders and validation share one computation.
+    Cached per process by the two files' content and the channels matched on,
+    so the dashboard, the seeders and validation share one computation.
     """
     if "Novice" not in trials or "Trained" not in trials:
         return None
     params = params or AlignmentParams()
-    key = (trials["Novice"].recording.sha256(), trials["Trained"].recording.sha256(), params)
+    channels = channels_for(trials["Novice"].kin.sensors, trials["Trained"].kin.sensors)
+    if not channels:
+        return None
+    key = (trials["Novice"].recording.sha256(), trials["Trained"].recording.sha256(), params, channels)
     if key not in _cache:
-        _cache[key] = align(trials["Novice"], trials["Trained"], params)
+        _cache[key] = align(trials["Novice"], trials["Trained"], params, channels)
     return _cache[key]
 
 
