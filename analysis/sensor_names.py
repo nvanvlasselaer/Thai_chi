@@ -20,6 +20,10 @@ the one onto the other, per recording.
   sensors have, a label not decided on, or no name at all.  A name no sensor
   has is not one of them: :func:`absent` lists those, and the analysis runs
   without them (:mod:`analysis.coverage`, ``docs/missing_sensors.md``).
+* A limb sensor's *placement* -- on the side of the segment, its front or its
+  back (:data:`analysis.orientation.PLACEMENTS`) -- is saved with the names;
+  where none is saved it is the one the first recordings had
+  (:data:`analysis.orientation.DEFAULT_PLACEMENT`).
 
 Nothing here reads more of a recording than its eight header rows.
 """
@@ -33,6 +37,7 @@ from pathlib import Path
 
 from analysis import config
 from analysis.data_io import read_header
+from analysis.orientation import DEFAULT_PLACEMENT, PLACEMENTS
 
 NAMES = tuple(config.SENSOR_MAP)
 """Every name the analysis uses, in the order it lists its sensors.  A recording may lack some of them."""
@@ -198,6 +203,13 @@ def used(names: dict[str, str | None]) -> dict[str, str]:
     return {label: name for label, name in names.items() if name in NAMES}
 
 
+def placements(names: dict[str, str | None], chosen: dict[str, str] | None = None) -> dict[str, str]:
+    """``{name: placement}`` for the limb sensors among ``names``: the one chosen for its label, else the default."""
+    chosen = chosen or {}
+    return {name: chosen.get(label) or DEFAULT_PLACEMENT[name]
+            for label, name in used(names).items() if name in DEFAULT_PLACEMENT}
+
+
 # ---------------------------------------------------------------------------
 # The saved mapping
 # ---------------------------------------------------------------------------
@@ -215,13 +227,31 @@ def load(path: Path) -> dict[str, str | None] | None:
     return {label: (name if name in NAMES else UNUSED) for label, name in sensors.items()}
 
 
-def save(path: Path, names: dict[str, str | None], labels: list[str], source: dict) -> None:
-    """Write ``sensor_names.json``: the checked names, in the file's order, and the file they belong to."""
+def load_placements(path: Path) -> dict[str, str]:
+    """The saved ``{label: placement}``; empty if none is saved, as in files written before placements were."""
+    try:
+        saved = json.loads(path.read_text()).get("placements")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return {}
+    if not isinstance(saved, dict):
+        return {}
+    return {label: placement for label, placement in saved.items() if placement in PLACEMENTS}
+
+
+def save(path: Path, names: dict[str, str | None], labels: list[str], source: dict,
+         chosen: dict[str, str] | None = None) -> None:
+    """Write ``sensor_names.json``: the checked names, in the file's order, and the file they belong to.
+
+    ``chosen`` is ``{label: placement}``; every limb sensor's placement is
+    written, the default where none was chosen.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
+    placed = placements(names, chosen)
     path.write_text(json.dumps({
         "recording": source,
         "saved_utc": now.isoformat(timespec="seconds"),
         "saved_local": now.astimezone().strftime("%d %b %Y %H:%M"),
         "sensors": {label: names.get(label) for label in labels if label in names},
+        "placements": {label: placed[names[label]] for label in labels if names.get(label) in placed},
     }, indent=2))

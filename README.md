@@ -128,7 +128,7 @@ the button that re-runs it:
 | stage | what it does | re-run when |
 | --- | --- | --- |
 | Recordings | choose a novice and a trained recording from the CSVs in `data/`, or leave one empty; **Use these recordings** switches to that selection | you want to analyse other recordings |
-| Sensor names | which sensor in each selected recording is which: every label in the file with the analysis name suggested for it, a dropdown to change it, and a stick figure showing which label each body spot has been given. **Save these names** writes them to the recording's `sensor_names.json`. Labels that spell the analysis names, as in the two original recordings, need nothing | a recording's labels are not the analysis names, or a sensor turns out misnamed |
+| Sensor names | which sensor in each selected recording is which: every label in the file with the analysis name suggested for it, a dropdown to change it, the placement of each limb sensor on its segment (lateral, frontal, dorsal), and a stick figure showing which label each body spot has been given. **Save these names** writes them to the recording's `sensor_names.json`. Labels that spell the analysis names, as in the two original recordings, need nothing | a recording's labels are not the analysis names, a sensor turns out misnamed, or the limb sensors sat on the front or back of the segments |
 | 1 · Orientation and kinematics | per selected recording: parses it, runs the Madgwick filter on all its sensors in parallel, and writes its orientation cache, 50 Hz kinematic CSV, sensor inventory, orientation validation figure and sensor check. Done once per recording and reused by every selection it is in. The card says which sensors, if any, need a look, and **Check sensors and kinematics** opens the Kinematics check page | a recording changes (detected from its size and SHA-256) or the orientation code changes |
 | 2 · Recordings loaded | rebuilds the kinematics from the caches (about 5 s) | after stage 1 (automatic) |
 | 3 · Event windows | the selection's session, which every metric is computed on. **New session** detects one from the v2 detectors or the v1 detectors; the session it replaces is kept in its `sessions/_previous.json`. A session from an older schema is migrated when it is opened (the original is kept as `sessions/pre-schema-2-<name>.json`) | you want to start the curation over |
@@ -175,10 +175,26 @@ before stage 1 each label is given one of those names (`analysis/sensor_names.py
 Stage 1 runs when no name has been given to two sensors and no label is left undecided. A name no
 sensor has is allowed: the recording lacks that sensor, and the analysis runs without it (see
 [Missing sensors](#missing-sensors)). The saved names are an input, like the session: they are kept in the recording's
-`sensor_names.json` and are meant to be committed. `recording.json` records the names each stage-1
-run used, so changing one marks the recording for stage 1 again, orientation filter included, since
-the assumed mounting depends on the name. Without the dashboard, `sensor_names.json` can be written by
-hand: `{"sensors": {"<label as in the file>": "<name>", …}}`, with `null` for a sensor not used.
+`sensor_names.json` and are meant to be committed. `recording.json` records the names and placements
+each stage-1 run used, so changing one marks the recording for stage 1 again, orientation filter
+included, since the assumed mounting depends on both. Without the dashboard, `sensor_names.json` can be
+written by hand: `{"sensors": {"<label as in the file>": "<name>", …}, "placements": {"<label>":
+"frontal", …}}`, with `null` for a sensor not used; a label left out of `placements` gets the default.
+
+**Placement.** How a sensor sits about its segment's long axis cannot be seen in the neutral pose
+(turning a sensor about the vertical leaves its tilt as it was), so it has to be given. Every sensor
+but the feet's sits with its z axis out of the skin and its y axis down the segment, so it is enough
+to say which way its face points when standing: **lateral** (out to the side), **frontal** (forward)
+or **dorsal** (backward). The upper arm, forearm, hand, thigh and shank sensors can be set per
+recording, on the card's *placement on the segment* column; by default they are where the first
+recordings had them, lateral except the forearms, which are frontal. A frontal sensor is mounted as
+the sternum's, a dorsal one as the sacrum's (`analysis.orientation.mounting_matrix`). The sternum,
+sacrum and feet are fixed. A leg sensor given the wrong placement shows in the kinematics check: taken
+lateral when it sat in front, the knee flexes about y instead of x; frontal and dorsal mixed up, a
+raised thigh points backward. On `IMUmama_testmoment1`, `IMUPOCpapa_eerstetestmoment` and
+`IMUPOCmama_derdetestmoment` (Sept 2026), only frontal legs pass both checks (knee axes 13–46° from
+x, every leg segment moving the allowed way), and a raised upper arm then points forward or outward
+(at most 3 % inward), never backward. The arms have no automatic check yet.
 
 The card's figure shows which label each spot on the body has been given, so a spot with no sensor,
 or with two, stands out. Whether each sensor really was on that segment shows once it moves, on the
@@ -224,10 +240,11 @@ when:
 - it moves while the participant stands still: more than 3 robust SDs (1.4826 × MAD) above the
   median sensor, in the stiller of the two quiet spans;
 - samples are missing;
-- a knee's flexion axis lies more than 45° from x (between 20° and 45° it is a note);
+- a knee's flexion axis lies more than 45° from x (between 20° and 45° it is a note): a leg sensor
+  rotated on the leg, or on the front or back of it while its placement says the side;
 - a leg segment moves the way its joint cannot: a raised thigh pointing backward, or a bent knee
   swinging the shank forward, more than half the time. That is what a leg sensor turned around on its
-  segment, or left and right swapped, produces, and the neutral pose cannot show either, because
+  segment (frontal and dorsal mixed up), or left and right swapped, produces, and the neutral pose cannot show either, because
   turning a sensor about the vertical leaves its tilt unchanged.
 
 Whether each sensor is on the segment it is labelled with is judged by eye. The page's stick figure
@@ -269,7 +286,7 @@ Two switches in `analysis/config.py` change the results, and are shown on the Pi
 | --- | --- | --- |
 | `DETECTOR` | `"v2"` | detectors a new session is taken from when none is chosen — see [Event detection](#event-detection) |
 | `METRICS_VERSION` | `3` | the metric definitions in force; stamped into the session, every CSV and `metrics_provenance.json` |
-| `EXPORT_VERSION` | `3` | format of the 50 Hz export; an older one is rebuilt from the orientation cache, without filtering |
+| `EXPORT_VERSION` | `4` | format of the 50 Hz export; an older one is rebuilt from the orientation cache, without filtering |
 | `IGNORE_HIGH_PASS_FILTER` | `False` | when true, `highpass_detrend` is a pass-through and the 0.05 Hz yaw de-drifting is disabled. At the default the high-pass is applied, which is what the committed results were produced with. It changes every yaw-derived metric, so the value in force is written into the session file on each save and shown in the editor header. |
 
 `DEFAULT_RECORDINGS` sets what is selected before anything has been chosen; afterwards the choice
@@ -633,8 +650,8 @@ outputs/
     kinematic_variables_50hz.csv   all joint angles resampled to 50 Hz (40 columns; only yaw and joint z high-passed)
     sensor_inventory.csv           per-sensor sample counts, duration, sampling rate, missing values
     orientation_validation.png     lumbar and sternum orientation, for sanity-checking the filter
-    sensor_check.csv               per sensor: mounting tilt, |g| at rest, stillness, knee axis, leg direction, status
-    sensor_names.json              the checked names of its sensors, {label in the file: analysis name}, where saved
+    sensor_check.csv               per sensor: placement, mounting tilt, |g| at rest, stillness, knee axis, leg direction, status
+    sensor_names.json              the checked names and limb placements of its sensors, by label in the file, where saved
   analyses/<selection>/            one folder per selection of recordings
     analysis.json                  which recordings, by name, size and SHA-256
     event_editor_session.json      the curated windows and their provenance

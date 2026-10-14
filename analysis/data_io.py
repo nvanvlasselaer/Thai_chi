@@ -45,6 +45,9 @@ class TrialData:
     data: dict[str, pd.DataFrame]
     recorded_as: dict[str, str] = field(default_factory=dict)
     """Each sensor's label in the file, by the name the analysis gives it."""
+    placements: dict[str, str] = field(default_factory=dict)
+    """Where each limb sensor sits on its segment, by name; one not in it sits where
+    :data:`analysis.orientation.DEFAULT_PLACEMENT` says."""
 
 
 HEADER_ROWS = 8
@@ -81,7 +84,8 @@ def canonical_sensor(name: str) -> str:
     return stem.lower().replace("_", "")
 
 
-def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = None) -> TrialData:
+def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = None,
+                  placements: dict[str, str] | None = None) -> TrialData:
     """Parse a Delsys Trigno Discover CSV export.
 
     Eight metadata rows, then one 12-column block per sensor (ACC X/Y/Z and
@@ -93,7 +97,8 @@ def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = 
     name the analysis uses (:mod:`analysis.sensor_names`); a sensor it maps to
     None, or leaves out, is not read.  Without it every label is reduced to
     its lower-case letters, which is what the labels of the first recordings
-    spell.
+    spell.  ``placements`` (``{name: placement}``) says where the limb sensors
+    sit, which the mounting of each depends on; it is kept with the data.
     """
     rows, separator, decimal = read_header(path)
 
@@ -148,7 +153,9 @@ def parse_IMU_csv(path: Path, label: str, names: dict[str, str | None] | None = 
 
     return TrialData(label=label, path=path, duration_meta_s=duration_meta_s, fs=fs,
                      sensors=[sensor for _, sensor, _ in blocks], data=data,
-                     recorded_as={sensor: text for _, sensor, text in blocks})
+                     recorded_as={sensor: text for _, sensor, text in blocks},
+                     placements={sensor: placement for sensor, placement in (placements or {}).items()
+                                 if sensor in data})
 
 
 def make_sensor_inventory(trials: list[TrialData]) -> pd.DataFrame:

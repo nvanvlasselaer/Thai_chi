@@ -64,16 +64,18 @@ def check(ok: bool, what: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def rereferenced(quats: dict[str, np.ndarray], window: tuple[int, int]) -> dict[str, np.ndarray]:
+def rereferenced(quats: dict[str, np.ndarray], window: tuple[int, int],
+                 placements: dict[str, str] | None = None) -> dict[str, np.ndarray]:
     """Body quaternions re-referenced to another neutral-pose window.
 
     ``q_body = q_nom q_off^-1 q_raw q_nom^-1``, with ``q_off`` the mean raw
     orientation over the neutral window, so with ``r = q_nom^-1 q_body q_nom``
     a new window gives ``q_nom m^-1 r q_nom^-1``, ``m`` the mean of ``r`` over it.
+    ``placements`` are the recording's (:attr:`analysis.data_io.TrialData.placements`).
     """
     out = {}
     for sensor, q in quats.items():
-        nominal = get_nominal_sensor_quaternion(sensor)
+        nominal = get_nominal_sensor_quaternion(sensor, (placements or {}).get(sensor))
         r = quat_multiply(quat_multiply(quat_inverse(nominal), q), nominal)
         m = mean_quaternion(r[window[0]:window[1]])
         out[sensor] = quat_multiply(quat_multiply(quat_multiply(nominal, quat_inverse(m)), r), quat_inverse(nominal))
@@ -91,12 +93,13 @@ def without(loaded: LoadedTrial, drop: tuple[str, ...]) -> LoadedTrial:
     keep = [sensor for sensor in trial.sensors if sensor not in drop]
     reduced = TrialData(label=trial.label, path=trial.path, duration_meta_s=trial.duration_meta_s, fs=trial.fs,
                         sensors=keep, data={sensor: trial.data[sensor] for sensor in keep},
-                        recorded_as={sensor: trial.recorded_as[sensor] for sensor in keep if sensor in trial.recorded_as})
+                        recorded_as={sensor: trial.recorded_as[sensor] for sensor in keep if sensor in trial.recorded_as},
+                        placements={sensor: trial.placements[sensor] for sensor in keep if sensor in trial.placements})
     n = len(loaded.kin.t)
     quats = {sensor: loaded.kin.quaternions[sensor] for sensor in keep}
     neutral = kinematics.find_neutral_pose_window(reduced)
     if neutral != kinematics.find_neutral_pose_window(trial):
-        quats = rereferenced(quats, neutral)
+        quats = rereferenced(quats, neutral, trial.placements)
     gyros = {sensor: reduced.data[sensor][GYRO_COLUMNS].to_numpy()[:n] for sensor in keep}
     kin = kinematics.kinematics_from_quaternions(loaded.kin.t, quats, gyros, kinematics.calibrate(reduced, n))
     return LoadedTrial(label=loaded.label, kin=kin, trial=reduced, fs=loaded.fs, n_samples=loaded.n_samples,

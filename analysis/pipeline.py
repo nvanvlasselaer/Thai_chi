@@ -156,7 +156,8 @@ def preprocess(
         report(f"Parsing {recording.name}")
         # Labelled by file name, not role: this stage belongs to the recording
         # and is shared by every selection it appears in.
-        parsed.append((recording, parse_IMU_csv(recording.path, recording.name, recording.sensor_names())))
+        parsed.append((recording, parse_IMU_csv(recording.path, recording.name, recording.sensor_names(),
+                                                recording.sensor_placements())))
 
     raw = run_orientation_filter([trial for _, trial in parsed], report, workers)
 
@@ -204,6 +205,7 @@ def _write_recording_manifest(recording: Recording, trial: TrialData, kin: Kinem
         "duration_s": round(float(kin.t[-1]), 3),
         "sensors": trial.sensors,
         "sensor_names": recording.sensor_names(),
+        "sensor_placements": recording.sensor_placements(),
         "export_version": config.EXPORT_VERSION,
         "processed_utc": now.isoformat(timespec="seconds"),
         "processed_local": now.astimezone().strftime("%d %b %Y %H:%M"),

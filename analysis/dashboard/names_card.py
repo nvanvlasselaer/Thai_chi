@@ -5,8 +5,11 @@ recording labels them however they were set up in Trigno Discover.  For the
 recording chosen at the top of the card, the table lists every label in the
 file with the name proposed for it -- the one the label spells, one it reads as,
 or the one its serial number has in another recording -- and a dropdown to
-change it.  **Save these names** writes them to the recording's
-``sensor_names.json``, and stage 1 processes the recording with them.
+change it.  A limb sensor also has a placement: on the outer side of its
+segment, the front or the back (:data:`analysis.orientation.PLACEMENTS`), which
+its assumed mounting depends on; the trunk's and the feet's are fixed.  **Save
+these names** writes both to the recording's ``sensor_names.json``, and stage 1
+processes the recording with them.
 
 Beside the table, the neutral pose seen from the front shows which label each
 spot on the body has been given, so a spot with no sensor, or with two, stands
@@ -26,6 +29,7 @@ from dash.exceptions import PreventUpdate
 from analysis import coverage, recordings, sensor_names
 from analysis.config import SENSOR_MAP
 from analysis.dashboard.state import jobs
+from analysis.orientation import DEFAULT_PLACEMENT, PLACEMENTS, TRUNK_PLACEMENT
 from analysis.skeleton import CONNECTIONS, pose, sensor_positions
 
 UNUSED, UNDECIDED = "(not used)", ""
@@ -36,6 +40,12 @@ BUTTON = {"padding": "5px 12px", "fontSize": "12px", "cursor": "pointer", "white
 
 NAME_OPTIONS = ([{"label": f"{name}  ·  {SENSOR_MAP[name].lower()}", "value": name} for name in sensor_names.NAMES]
                 + [{"label": "not used", "value": UNUSED}])
+PLACEMENT_WORDS = {"lateral": "on the outer side", "frontal": "on the front", "dorsal": "on the back"}
+PLACEMENT_OPTIONS = [{"label": f"{placement.capitalize()}  ·  {PLACEMENT_WORDS[placement]}", "value": placement}
+                     for placement in PLACEMENTS]
+FIXED_PLACEMENT = ({name: f"{placement.capitalize()} (fixed)" for name, placement in TRUNK_PLACEMENT.items()}
+                   | {"lfoot": "On top (fixed)", "rfoot": "On top (fixed)"})
+"""What the placement column shows for the sensors whose placement cannot be set."""
 LABEL_GAP = 0.14
 """Least vertical distance between two labels of the figure, in its units (m)."""
 FIGURE_WIDTH_PX = 460
@@ -50,6 +60,7 @@ def rows_for(recording: recordings.Recording) -> list[dict]:
     """One row per label in the file: the saved name where there is one, else the proposed one."""
     labels = recording.sensor_labels()
     saved = sensor_names.load(recording.sensor_names_path)
+    placed = sensor_names.load_placements(recording.sensor_names_path)
     proposals = sensor_names.suggest(labels, recordings.serial_history(exclude=recording))
     rows = []
     for label in labels:
@@ -60,14 +71,28 @@ def rows_for(recording: recordings.Recording) -> list[dict]:
         else:
             value = proposed or UNDECIDED
             how = why if proposed else f"choose a name: {why}"
-        rows.append({"label": label, "name": value, "how": how, "base": value, "base_how": how})
+        placement = placement_cell(value, placed.get(label))
+        rows.append({"label": label, "name": value, "placement": placement, "how": how, "base": value,
+                     "base_placement": placement, "base_how": how})
     return rows
+
+
+def placement_cell(name: str, chosen: str | None = None) -> str:
+    """The placement cell of a sensor named ``name``: ``chosen`` where it can be set, else the default or fixed one."""
+    if name in DEFAULT_PLACEMENT:
+        return chosen if chosen in PLACEMENTS else DEFAULT_PLACEMENT[name]
+    return FIXED_PLACEMENT.get(name, "")
 
 
 def names_of(rows: list[dict]) -> dict[str, str | None]:
     """``{label: name or None}`` from the table, leaving out labels not decided on."""
     return {row["label"]: (None if row["name"] == UNUSED else row["name"])
             for row in rows if row["name"] != UNDECIDED}
+
+
+def placements_of(rows: list[dict]) -> dict[str, str]:
+    """``{label: placement}`` from the table, for the sensors whose placement can be set."""
+    return {row["label"]: row["placement"] for row in rows if row["name"] in DEFAULT_PLACEMENT}
 
 
 def _side(sensor: str) -> str:
@@ -83,6 +108,7 @@ def naming_figure(rows: list[dict]) -> go.Figure:
     """The neutral pose seen from the front, each sensor spot labelled with what it has been given."""
     names = names_of(rows)
     holders = {name: [label for label, given in names.items() if given == name] for name in sensor_names.NAMES}
+    placed = {row["name"]: row["placement"] for row in rows if row["name"] in DEFAULT_PLACEMENT}
     positions, _ = pose({})
     spots = sensor_positions(positions)
     figure = go.Figure()
@@ -121,13 +147,14 @@ def naming_figure(rows: list[dict]) -> go.Figure:
                 text, colour = "<b>no sensor</b>", MISSING_COLOUR
             else:
                 text, colour = f"<b>{len(given)} sensors</b>", DOUBLE_COLOUR  # named in the hover and the table
+            where = f" · {placed[name]}" if given and name in placed else ""
             colours[name] = colour
-            hovers[name] = f"{name} ({SENSOR_MAP[name].lower()}): " + (", ".join(given) or "no sensor")
+            hovers[name] = f"{name} ({SENSOR_MAP[name].lower()}){where}: " + (", ".join(given) or "no sensor")
             anchor = 0.5 * direction
             figure.add_trace(go.Scatter(x=[-float(spot[0]), anchor], y=[float(spot[2]), y], mode="lines",
                                         line={"color": "#c8c8c8", "width": 1}, hoverinfo="skip"))
             figure.add_annotation(x=anchor, y=y, showarrow=False, xanchor="right" if direction < 0 else "left",
-                                  text=f"{text}<br><span style='color:#999'>{name}</span>",
+                                  text=f"{text}<br><span style='color:#999'>{name}{where}</span>",
                                   align="right" if direction < 0 else "left", font={"size": 10, "color": colour})
 
     order = list(sensor_names.NAMES)
@@ -159,7 +186,7 @@ def naming_figure(rows: list[dict]) -> go.Figure:
 
 
 def layout() -> html.Div:
-    """The card's controls: which recording, its labels and names, and the figure."""
+    """The card's controls: which recording, its labels, names and placements, and the figure."""
     return html.Details([
         html.Summary("Show the sensors", style={"fontSize": "12px", "color": "#1d6fa5", "cursor": "pointer"}),
         html.Div([
@@ -174,19 +201,34 @@ def layout() -> html.Div:
                             {"name": "label in the recording", "id": "label", "editable": False},
                             {"name": "name in the analysis", "id": "name", "presentation": "dropdown",
                              "editable": True},
+                            {"name": "placement on the segment", "id": "placement", "presentation": "dropdown",
+                             "editable": True},
                             {"name": "how", "id": "how", "editable": False},
                         ],
                         dropdown={"name": {"options": NAME_OPTIONS, "clearable": False}},
+                        # The options follow the row's name: a choice for the limbs, the one fixed value otherwise.
+                        dropdown_conditional=[
+                            {"if": {"column_id": "placement", "filter_query": " || ".join(
+                                f'{{name}} = "{name}"' for name in DEFAULT_PLACEMENT)},
+                             "options": PLACEMENT_OPTIONS, "clearable": False},
+                        ] + [
+                            {"if": {"column_id": "placement", "filter_query": f'{{name}} = "{name}"'},
+                             "options": [{"label": shown, "value": shown}], "clearable": False}
+                            for name, shown in FIXED_PLACEMENT.items()
+                        ],
                         style_cell={"fontSize": "11px", "padding": "3px 6px", "textAlign": "left",
                                     "fontFamily": "system-ui, sans-serif", "whiteSpace": "normal",
                                     "height": "auto"},
                         style_cell_conditional=[{"if": {"column_id": "label"}, "minWidth": "120px"},
                                                 {"if": {"column_id": "name"}, "minWidth": "190px"},
+                                                {"if": {"column_id": "placement"}, "minWidth": "190px"},
                                                 {"if": {"column_id": "how"}, "color": "#666"}],
                         style_header={"fontWeight": "bold", "backgroundColor": "#f0f0f0"},
                         style_data_conditional=[
                             {"if": {"filter_query": '{name} = ""'}, "backgroundColor": "#fdecea"},
                             {"if": {"filter_query": '{how} contains "not saved"'}, "backgroundColor": "#fff4d6"},
+                            {"if": {"column_id": "placement", "filter_query": '{placement} contains "fixed"'},
+                             "color": "#999"},
                         ],
                         css=[{"selector": ".Select-menu-outer", "rule": "display: block !important"}],
                     ),
@@ -254,7 +296,9 @@ def register_callbacks(app: Dash) -> None:
         trigger, message = ctx.triggered_id, ""
         if trigger == "names-table" and rows:
             for row in rows:
-                row["how"] = row["base_how"] if row["name"] == row["base"] else "changed here, not saved yet"
+                row["placement"] = placement_cell(row["name"], row.get("placement"))
+                changed = row["name"] != row["base"] or row["placement"] != row.get("base_placement")
+                row["how"] = "changed here, not saved yet" if changed else row["base_how"]
             drafts[name] = rows
         elif trigger == "btn-names-save" and rows:
             labels = recording.sensor_labels()
@@ -263,10 +307,12 @@ def register_callbacks(app: Dash) -> None:
             elif sensor_names.problems(names_of(rows), labels):
                 message = "Not saved: sort out the problems above first."
             else:
-                sensor_names.save(recording.sensor_names_path, names_of(rows), labels, recording.identity())
+                sensor_names.save(recording.sensor_names_path, names_of(rows), labels, recording.identity(),
+                                  placements_of(rows))
                 drafts.pop(name, None)
                 rows = rows_for(recording)
-                message = ("Saved. Stage 1 processes the recording with these names: press Run pipeline."
+                message = ("Saved. Stage 1 processes the recording with these names and placements: press Run "
+                           "pipeline."
                            if recording.cache_state()[0] != "done" else "Saved.")
         elif trigger == "btn-names-reset":
             drafts.pop(name, None)
@@ -277,7 +323,8 @@ def register_callbacks(app: Dash) -> None:
         names = names_of(rows)
         labels = recording.sensor_labels()
         problems = sensor_names.problems(names, labels)
-        unsaved = names != recording.sensor_names()
+        unsaved = (names != recording.sensor_names()
+                   or sensor_names.placements(names, placements_of(rows)) != recording.sensor_placements())
         absent = sensor_names.absent(names, labels)
         if problems:
             summary = html.Div([html.Div("To sort out before stage 1 can run:", style={"fontWeight": "600"}),

@@ -147,7 +147,51 @@ def madgwick_imu(acc_g: np.ndarray, gyro_dps: np.ndarray, fs: float, beta: float
 # ---------------------------------------------------------------------------
 
 
-def mounting_matrix(sensor_name: str) -> np.ndarray:
+LATERAL, FRONTAL, DORSAL = "lateral", "frontal", "dorsal"
+PLACEMENTS = (LATERAL, FRONTAL, DORSAL)
+"""Where a limb sensor sits on its segment: which way its face points in the
+neutral pose -- out to the side, forward or backward."""
+
+DEFAULT_PLACEMENT = {
+    "lhumerus": LATERAL, "rhumerus": LATERAL, "lulna": FRONTAL, "rulna": FRONTAL,
+    "lhand": LATERAL, "rhand": LATERAL, "lthigh": LATERAL, "rthigh": LATERAL,
+    "ltibia": LATERAL, "rtibia": LATERAL,
+}
+"""The sensors whose placement a recording can set (``sensor_names.json``), and
+where each sat in the first recordings, which is what a recording that says
+nothing gets."""
+
+TRUNK_PLACEMENT = {"chestbone": FRONTAL, "lumbar": DORSAL}
+"""The trunk sensors' placement, which is fixed: on the sternum and on the sacrum."""
+
+# Columns are the sensor's own x, y and z axes in the body frame.  Every sensor
+# but the feet's sits with its z axis out of the skin and its y axis pointing
+# down the segment, so the way its face points decides the rest.
+FACING = {
+    FRONTAL: np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]),
+    DORSAL: np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]]),
+    "left": np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]]),
+    "right": np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]]),
+}
+
+
+def placement_of(sensor_name: str, placement: str | None = None) -> str | None:
+    """Where a sensor sits: ``placement`` for a limb sensor, else its default; the trunk's are fixed.
+
+    None for a sensor with no placement of the kind: the feet, whose sensors
+    sit on top of the instep, or an unrecognised name.
+    """
+    if sensor_name in TRUNK_PLACEMENT:
+        return TRUNK_PLACEMENT[sensor_name]
+    if sensor_name not in DEFAULT_PLACEMENT:
+        return None
+    placement = placement or DEFAULT_PLACEMENT[sensor_name]
+    if placement not in PLACEMENTS:
+        raise ValueError(f"{sensor_name}: unknown placement {placement!r}, expected one of {', '.join(PLACEMENTS)}")
+    return placement
+
+
+def mounting_matrix(sensor_name: str, placement: str | None = None) -> np.ndarray:
     """Rotation from a sensor's own axes to the common body frame.
 
     The sensors are mounted in different orientations on the body, so each is
@@ -161,25 +205,28 @@ def mounting_matrix(sensor_name: str) -> np.ndarray:
     no such check; a functional-calibration trial would give one.
 
     The rotation also assumes how each sensor sits about its segment's long
-    axis, which the neutral pose cannot show.  The knees' flexion axes come
-    out 28-42 deg from x, turned opposite ways on the two legs, consistent
-    with the shank sensors on the flat anteromedial face of the tibia rather
-    than its front, or with the feet turned out in the neutral pose.
+    axis, which the neutral pose cannot show: turning a sensor about the
+    vertical leaves its tilt as it was.  For a limb sensor that is its
+    ``placement`` (:data:`PLACEMENTS`, by default :data:`DEFAULT_PLACEMENT`): a
+    frontal one is mounted as the sternum's, a dorsal one as the sacrum's.
+    Taken lateral when it sits in front, a leg's flexion shows on y instead of
+    x, which the sensor check flags.  The knees' flexion axes still come out
+    28-42 deg from x in the first recordings, turned opposite ways on the two
+    legs, consistent with the shank sensors on the flat anteromedial face of
+    the tibia rather than its front, or with the feet turned out in the
+    neutral pose.
     """
-    if sensor_name in ["chestbone", "lulna", "rulna"]:
-        return np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]])
-    if sensor_name == "lumbar":
-        return np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]])
-    if sensor_name in ["lhumerus", "lhand", "lthigh", "ltibia"]:
-        return np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]])
-    if sensor_name in ["rhumerus", "rhand", "rthigh", "rtibia"]:
-        return np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]])
-    # The foot sensors are already aligned with the body frame; an unrecognised
-    # sensor is left as it is.
-    return np.eye(3)
+    placement = placement_of(sensor_name, placement)
+    if placement is None:
+        # The foot sensors are already aligned with the body frame; an
+        # unrecognised sensor is left as it is.
+        return np.eye(3)
+    if placement == LATERAL:  # out of the skin is outward: to the left on the left limbs
+        placement = "left" if sensor_name.startswith("l") else "right"
+    return FACING[placement].copy()
 
 
-def get_nominal_sensor_quaternion(sensor_name: str) -> np.ndarray:
+def get_nominal_sensor_quaternion(sensor_name: str, placement: str | None = None) -> np.ndarray:
     """:func:`mounting_matrix` as a wxyz quaternion."""
-    q = Rotation.from_matrix(mounting_matrix(sensor_name)).as_quat()
+    q = Rotation.from_matrix(mounting_matrix(sensor_name, placement)).as_quat()
     return np.array([q[3], q[0], q[1], q[2]])

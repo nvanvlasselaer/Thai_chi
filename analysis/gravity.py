@@ -52,7 +52,7 @@ def up_in_body(kin: Kinematics, sensor: str) -> np.ndarray:
 def body_gyro_dps(kin: Kinematics, trial: TrialData, sensor: str) -> np.ndarray:
     """Bias-corrected gyroscope signal in body axes (deg/s)."""
     gyro = trial.data[sensor][GYRO_COLUMNS].to_numpy()[: len(kin.t)]
-    return (gyro - kin.calibration.gyro_bias_dps[sensor]) @ mounting_matrix(sensor).T
+    return (gyro - kin.calibration.gyro_bias_dps[sensor]) @ mounting_matrix(sensor, trial.placements.get(sensor)).T
 
 
 def vertical_angular_velocity(kin: Kinematics, trial: TrialData, sensor: str) -> np.ndarray:
@@ -92,7 +92,7 @@ def linear_acceleration(
     sampled at 370 Hz and sensor noise would otherwise enter the sway.
     """
     n = len(kin.t)
-    acc = trial.data[sensor][ACC_COLUMNS].to_numpy()[:n] @ mounting_matrix(sensor).T
+    acc = trial.data[sensor][ACC_COLUMNS].to_numpy()[:n] @ mounting_matrix(sensor, trial.placements.get(sensor)).T
     up = up_in_body(kin, sensor)
     z = np.array([0.0, 0.0, 1.0])
     axis = np.cross(up, z)

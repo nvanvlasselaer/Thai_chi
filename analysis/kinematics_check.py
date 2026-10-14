@@ -37,6 +37,7 @@ from analysis import config, coverage
 from analysis.data_io import ACC_COLUMNS, GYRO_COLUMNS, TrialData
 from analysis.gravity import leg_lift_index, tilt_deg
 from analysis.kinematics import Kinematics
+from analysis.orientation import placement_of
 from analysis.signals import highpass_detrend, lowpass_signal, resample_filtered_full
 
 
@@ -62,7 +63,8 @@ while the participant stands still: a loose strap, or that segment moved."""
 
 KNEE_AXIS_LIMIT_DEG = 45.0
 """A knee whose flexion axis is more than this from x is read mostly on another
-axis: a thigh or shank sensor is rotated on the leg."""
+axis: a thigh or shank sensor is rotated on the leg, or sits on the front or
+back of it while its placement says the side (or the other way round)."""
 
 KNEE_AXIS_NOTE_DEG = 20.0
 """Below the limit but above this, flexion leaks into the ab/adduction and
@@ -172,7 +174,8 @@ def sensor_check(kin: Kinematics, trial: TrialData, dedrifted: dict[str, Rotatio
         if joint and np.isfinite(offset):
             if offset > KNEE_AXIS_LIMIT_DEG:
                 checks.append(f"the {joint} flexes {offset:.0f} deg away from the assumed axis: a thigh or "
-                              "shank sensor is rotated on the leg")
+                              "shank sensor is rotated on the leg, or its placement (lateral, frontal, dorsal) "
+                              "is not where it sat")
             elif offset > KNEE_AXIS_NOTE_DEG:
                 notes.append(f"{joint} flexion axis {offset:.0f} deg from x: part of the flexion shows in "
                              "the other components (a functional calibration would remove it)")
@@ -182,14 +185,17 @@ def sensor_check(kin: Kinematics, trial: TrialData, dedrifted: dict[str, Rotatio
         if np.isfinite(share) and share < 0.5:
             if LEG_DIRECTIONS[sensor][2] > 0:
                 checks.append(f"raised, it points backward {1 - share:.0%} of the time, which the hip cannot do: "
-                              "turned around on the thigh, or the left and right thigh sensors swapped")
+                              "turned around on the thigh (frontal and dorsal mixed up?), or the left and right "
+                              "thigh sensors swapped")
             else:
                 checks.append(f"bent, the knee swings the shank forward {1 - share:.0%} of the time, which it "
-                              "cannot do: the thigh or shank sensor turned around, or left and right swapped")
+                              "cannot do: the thigh or shank sensor turned around (frontal and dorsal mixed "
+                              "up?), or left and right swapped")
         rows.append({
             "sensor": sensor,
             "recorded_as": trial.recorded_as.get(sensor, sensor),
             "segment": config.SENSOR_MAP.get(sensor, "unmapped"),
+            "placement": placement_of(sensor, trial.placements.get(sensor)) or "",
             "mounting_tilt_deg": round(tilt, 1),
             "gravity_at_rest_g": round(gravity, 3),
             "gyro_bias_dps": round(float(np.linalg.norm(calibration.gyro_bias_dps[sensor])), 2),

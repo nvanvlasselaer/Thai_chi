@@ -265,7 +265,7 @@ def calibrate(trial: TrialData, n: int) -> Calibration:
         ])
         scatter[sensor] = float(np.linalg.norm(np.nanstd(medians, axis=0)))
 
-        acc = trial.data[sensor][ACC_COLUMNS].to_numpy()[:n] @ mounting_matrix(sensor).T
+        acc = trial.data[sensor][ACC_COLUMNS].to_numpy()[:n] @ mounting_matrix(sensor, trial.placements.get(sensor)).T
         mean_acc = np.nanmean(acc[neutral[0]:neutral[1]], axis=0)
         g_ref[sensor] = float(np.linalg.norm(mean_acc))
         up_ref[sensor] = mean_acc / g_ref[sensor]
@@ -293,7 +293,8 @@ def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None
 
     Each sensor's Madgwick output is re-referenced to the neutral pose, then
     rotated from the sensor's own axes into the body frame:
-    ``q_body = q_mount * q_neutral^-1 * q_raw * q_mount^-1``.
+    ``q_body = q_mount * q_neutral^-1 * q_raw * q_mount^-1``, ``q_mount`` by
+    the sensor's name and placement (``trial.placements``).
 
     ``raw_quats`` supplies the filter output per sensor when it has already
     been computed from :func:`sensor_signals`; otherwise it is computed here,
@@ -312,7 +313,7 @@ def compute_kinematics(trial: TrialData, raw_quats: dict[str, np.ndarray] | None
         else:
             sensor_quats = raw_quats[sensor]
         q_offset = mean_quaternion(sensor_quats[neutral_start:neutral_end])
-        q_nom = get_nominal_sensor_quaternion(sensor)
+        q_nom = get_nominal_sensor_quaternion(sensor, trial.placements.get(sensor))
 
         q_O_inv = quat_inverse(q_offset)
         q_nom_inv = quat_inverse(q_nom)
@@ -403,7 +404,7 @@ def load_trial(recording: Recording, label: str) -> LoadedTrial:
     problems = recording.naming_problems()
     if problems:
         raise ValueError(f"The sensor names of {recording.name} need a look: {'; '.join(problems)}.")
-    trial = parse_IMU_csv(recording.path, label, recording.sensor_names())
+    trial = parse_IMU_csv(recording.path, label, recording.sensor_names(), recording.sensor_placements())
     n = min(len(df) for df in trial.data.values())
 
     time_s, quats = load_orientation_npz(recording.orientation_path)

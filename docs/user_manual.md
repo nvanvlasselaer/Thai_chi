@@ -53,6 +53,8 @@ When the labels spell the names, as they do in the two original recordings, ther
 
 Change any name with its dropdown, or choose **not used** for a sensor the analysis should leave out. The figure beside the table shows the body from the front with each sensor spot labelled with what it has been given. A spot marked **2 sensors** (orange) needs fixing, and the list under the table says what else does. A spot marked **no sensor** (red) is allowed: the recording lacks that sensor, and the card lists what the analysis leaves out without it. When every label has a name (or *not used*) and no name is given twice, **Save these names** writes them to the recording's `sensor_names.json`, and **Run pipeline** processes the recording with them. **Back to the suggestions** discards your changes.
 
+The **placement on the segment** column says where each limb sensor (upper arm, forearm, hand, thigh, shank) was strapped, by which way its face pointed while standing: **Lateral** (on the outer side), **Frontal** (on the front) or **Dorsal** (on the back). It decides which of the sensor's axes the analysis takes for flexion, so set it to how the sensors were placed in that session: in the first recordings the forearms were frontal and the rest lateral, which is the default. The sternum, sacrum and feet are fixed. The figure shows each limb's placement under its name. Changing a placement and saving marks the recording for stage 1 again. Afterwards, the Kinematics check page shows whether the legs agree: a wrong placement makes the knee flex about the wrong axis, or a raised thigh point backward.
+
 ### When a sensor is missing
 
 Many recordings lack a sensor: a hand, or the sternum. The analysis then runs with what it has. Each metric is measured, measured with a validated stand-in, or left empty; [docs/missing_sensors.md](missing_sensors.md) lists every rule and why. On the dashboard:
@@ -72,6 +74,7 @@ Open it after stage 1, before placing any event: it shows whether each sensor si
 
 | column | what it says | marked **check** when |
 | --- | --- | --- |
+| placement | where the limb sensor sits on its segment, as saved on the Sensor names card (lateral, frontal, dorsal) | — |
 | mounting tilt | how far the axis the mounting assumes is vertical sits from vertical in the neutral pose. The trunk sensors sit 13–18° off on the lordosis and the sternum, the feet ~40° on the slope of the instep | over 45°: the sensor is rotated or turned over on its segment |
 | \|g\| at rest | the accelerometer's reading in the neutral pose | not 1 g ± 0.05 |
 | gyro bias | what the gyroscope reads while nothing moves; it is subtracted from every angular speed | — |

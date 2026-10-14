@@ -58,6 +58,7 @@ TABLE_COLUMNS = [
     ("sensor", "sensor"),
     ("recorded_as", "recorded as"),
     ("segment", "segment"),
+    ("placement", "placement"),
     ("mounting_tilt_deg", "mounting tilt (deg)"),
     ("gravity_at_rest_g", "|g| at rest"),
     ("gyro_bias_dps", "gyro bias (deg/s)"),

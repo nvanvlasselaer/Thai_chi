@@ -78,7 +78,7 @@ SENSOR_MAP = {
     "rhand": "Right Hand",
 }
 
-EXPORT_VERSION = 3
+EXPORT_VERSION = 4
 """Format of the derived stage-1 outputs -- the 50 Hz kinematic export, the
 sensor inventory and the sensor check -- recorded in each recording's
 ``recording.json``; an older one marks them out of date, and they are rebuilt
@@ -93,4 +93,7 @@ from the orientation cache without re-running the filter.
 3. The sensor inventory and the sensor check name each sensor's label in the
    file (``recorded_as``), since sensors can be named by hand
    (:mod:`analysis.sensor_names`).
+4. The sensor check gives each sensor's placement on its segment (lateral,
+   frontal, dorsal), which its assumed mounting depends on
+   (:func:`analysis.orientation.mounting_matrix`).
 """

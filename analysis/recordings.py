@@ -141,6 +141,14 @@ class Recording:
         saved = sensor_names.load(self.sensor_names_path)
         return saved if saved is not None else sensor_names.automatic(self.sensor_labels())
 
+    def sensor_placements(self) -> dict[str, str]:
+        """``{name: placement}`` of its limb sensors: the saved ones, else where they sat in the first recordings.
+
+        The mounting each sensor is assumed to have depends on it
+        (:func:`analysis.orientation.mounting_matrix`).
+        """
+        return sensor_names.placements(self.sensor_names(), sensor_names.load_placements(self.sensor_names_path))
+
     def naming_problems(self) -> list[str]:
         """What keeps :meth:`sensor_names` from being used; empty when stage 1 can run."""
         return sensor_names.problems(self.sensor_names(), self.sensor_labels())
@@ -155,6 +163,14 @@ class Recording:
         if recorded is None:  # processed before the names were recorded: the labels' own spelling was used
             recorded = sensor_names.automatic(self.sensor_labels())
         return sensor_names.used(recorded) == sensor_names.used(self.sensor_names())
+
+    def _placements_current(self, manifest: dict) -> bool:
+        """Whether the outputs were computed with the sensor placements in force now."""
+        recorded = manifest.get("sensor_placements")
+        if recorded is None:  # processed before placements were recorded: every sensor had its default
+            recorded = sensor_names.placements(manifest.get("sensor_names")
+                                               or sensor_names.automatic(self.sensor_labels()))
+        return recorded == self.sensor_placements()
 
     def manifest(self) -> dict | None:
         """What ``recording.json`` says the outputs were computed from, if it exists."""
@@ -183,6 +199,8 @@ class Recording:
             return "stale", "the file has changed since it was processed"
         if not self._names_current(manifest):
             return "stale", "its sensor names have changed since it was processed"
+        if not self._placements_current(manifest):
+            return "stale", "its sensor placements have changed since it was processed"
         absent = [path.name for path in self.outputs() if not path.exists()]
         if absent:
             return "stale", f"missing {', '.join(absent)}"
@@ -199,7 +217,7 @@ class Recording:
         source = manifest.get("source", {})
         return source.get("size") == self.size and (
             source.get("mtime_ns") == self.mtime_ns or source.get("sha256") == self.sha256()
-        ) and self._names_current(manifest)
+        ) and self._names_current(manifest) and self._placements_current(manifest)
 
     def export_stale(self) -> bool:
         """The 50 Hz export was written in an older format than ``config.EXPORT_VERSION``."""

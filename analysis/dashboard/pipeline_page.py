@@ -78,8 +78,10 @@ def _stages() -> list[tuple]:
          "Which sensor in each recording is which. The analysis knows its 14 sensors by fixed names, which "
          "decide how each is assumed to sit on the body. Where a label in the file spells one of them it is "
          "used as it is; otherwise a name is suggested -- from what the label reads as, or from the name "
-         "the same serial number has in another recording -- and used once saved here. A recording may "
-         "lack some of the 14: the analysis then runs without them (docs/missing_sensors.md).",
+         "the same serial number has in another recording -- and used once saved here. Each limb sensor "
+         "also has a placement: on the outer side of its segment (as in the first recordings), the front "
+         "or the back. A recording may lack some of the 14: the analysis then runs without them "
+         "(docs/missing_sensors.md).",
          [names_card.layout()]),
         ("preprocess", "1", "Orientation and kinematics",
          "Parse each selected recording and run the Madgwick orientation filter on every sensor, in "
