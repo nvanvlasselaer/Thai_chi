@@ -1,0 +1,823 @@
+{
+  "schema_version": 2,
+  "created_utc": "2026-10-14T22:23:17+00:00",
+  "modified_utc": "2026-10-14T22:23:17+00:00",
+  "recordings": {
+    "Novice": {
+      "file": "IMUmama_testmoment1.csv",
+      "id": "IMUmama_testmoment1",
+      "size": 128579011,
+      "sha256": "43a3c3648944c667b85790954f0d6338bd053fe3210f1a719f2dd706eb9ac75d"
+    },
+    "Trained": {
+      "file": "Trial_01.csv",
+      "id": "Trial_01",
+      "size": 139137458,
+      "sha256": "000ac27c0c83427fb59071848bb3cd7b4719bc7a5f50e47d8a935d23db993d4e"
+    }
+  },
+  "fs": {
+    "Novice": 370.3704,
+    "Trained": 370.3704
+  },
+  "n_samples": {
+    "Novice": 71760,
+    "Trained": 85325
+  },
+  "ignore_high_pass_filter": false,
+  "metrics_version": 3,
+  "detector": {
+    "trunk_n_events": 6,
+    "trunk_rel_threshold": 0.15,
+    "trunk_floor_percentile": 40.0,
+    "trunk_peak_percentile": 90.0,
+    "trunk_peak_separation_s": 2.0,
+    "trunk_min_duration_s": 1.5,
+    "trunk_max_duration_s": 20.0,
+    "trunk_min_excursion_deg": 8.0,
+    "trunk_envelope_cutoff_hz": 1.5,
+    "trunk_yaw_cutoff_hz": 4.0,
+    "knee_method": "lift",
+    "knee_lift_min_peak": 0.25,
+    "knee_lift_rel_threshold": 0.15,
+    "knee_lift_min_duration_s": 0.5,
+    "knee_threshold_deg": 60.0,
+    "knee_min_duration_s": 0.4,
+    "knee_merge_gap_s": 0.2,
+    "smooth_yaw_cutoff_hz": 0.5,
+    "smooth_min_lobe_deg": 10.0,
+    "smooth_min_lobe_separation_s": 1.5,
+    "smooth_min_excursion_deg": 10.0,
+    "smooth_min_duration_s": 1.0,
+    "smooth_max_duration_s": 15.0,
+    "stab_min_duration_s": 3.0,
+    "stab_horizon_s": 10.0,
+    "stab_latency_weight": 0.65,
+    "stab_baseline_percentile": 20.0,
+    "stab_scale_percentile": 50.0,
+    "stab_low_confidence_z": 1.0,
+    "stab_omega_cutoff_hz": 4.0
+  },
+  "lag_pad_s": 2.0,
+  "knee_lag_window_s": [
+    2.0,
+    3.0
+  ],
+  "trunk_events": [
+    {
+      "event_id": "trunk-01",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 22707,
+          "event_end": 24372,
+          "stab_start": 24372,
+          "stab_end": 25483,
+          "event_start_s": 61.3089,
+          "event_end_s": 65.8044,
+          "stab_start_s": 65.8044,
+          "stab_end_s": 68.8041,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.689,
+          "stab_quiet_z": 0.454
+        },
+        "Trained": {
+          "event_start": 15940,
+          "event_end": 17112,
+          "stab_start": 17112,
+          "stab_end": 18223,
+          "event_start_s": 43.038,
+          "event_end_s": 46.2024,
+          "stab_start_s": 46.2024,
+          "stab_end_s": 49.2021,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.048,
+          "stab_quiet_z": 0.038
+        }
+      }
+    },
+    {
+      "event_id": "trunk-02",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 25918,
+          "event_end": 26749,
+          "stab_start": 26749,
+          "stab_end": 27860,
+          "event_start_s": 69.9786,
+          "event_end_s": 72.2223,
+          "stab_start_s": 72.2223,
+          "stab_end_s": 75.222,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 3.74,
+          "stab_quiet_z": 0.737
+        },
+        "Trained": {
+          "event_start": 19188,
+          "event_end": 20035,
+          "stab_start": 20035,
+          "stab_end": 21146,
+          "event_start_s": 51.8076,
+          "event_end_s": 54.0945,
+          "stab_start_s": 54.0945,
+          "stab_end_s": 57.0942,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.521,
+          "stab_quiet_z": 0.421
+        }
+      }
+    },
+    {
+      "event_id": "trunk-03",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 41282,
+          "event_end": 43652,
+          "stab_start": 43652,
+          "stab_end": 44763,
+          "event_start_s": 111.4614,
+          "event_end_s": 117.8604,
+          "stab_start_s": 117.8604,
+          "stab_end_s": 120.8601,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 12.64,
+          "stab_quiet_z": 3.13
+        },
+        "Trained": {
+          "event_start": 34746,
+          "event_end": 36205,
+          "stab_start": 36205,
+          "stab_end": 37316,
+          "event_start_s": 93.8142,
+          "event_end_s": 97.7535,
+          "stab_start_s": 97.7535,
+          "stab_end_s": 100.7532,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 5.603,
+          "stab_quiet_z": 3.72
+        }
+      }
+    },
+    {
+      "event_id": "trunk-04",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 43714,
+          "event_end": 46198,
+          "stab_start": 46198,
+          "stab_end": 47309,
+          "event_start_s": 118.0278,
+          "event_end_s": 124.7346,
+          "stab_start_s": 124.7346,
+          "stab_end_s": 127.7343,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 6.947,
+          "stab_quiet_z": 1.599
+        },
+        "Trained": {
+          "event_start": 37720,
+          "event_end": 40093,
+          "stab_start": 40093,
+          "stab_end": 41204,
+          "event_start_s": 101.844,
+          "event_end_s": 108.2511,
+          "stab_start_s": 108.2511,
+          "stab_end_s": 111.2508,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 3.208,
+          "stab_quiet_z": 1.784
+        }
+      }
+    },
+    {
+      "event_id": "trunk-05",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 47343,
+          "event_end": 48596,
+          "stab_start": 48596,
+          "stab_end": 49707,
+          "event_start_s": 127.8261,
+          "event_end_s": 131.2092,
+          "stab_start_s": 131.2092,
+          "stab_end_s": 134.2089,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 12.99,
+          "stab_quiet_z": 3.224
+        },
+        "Trained": {
+          "event_start": 40861,
+          "event_end": 42935,
+          "stab_start": 42935,
+          "stab_end": 44046,
+          "event_start_s": 110.3247,
+          "event_end_s": 115.9245,
+          "stab_start_s": 115.9245,
+          "stab_end_s": 118.9242,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 3.783,
+          "stab_quiet_z": 2.249
+        }
+      }
+    },
+    {
+      "event_id": "trunk-06",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 69120,
+          "event_end": 69988,
+          "stab_start": 69988,
+          "stab_end": 71099,
+          "event_start_s": 186.624,
+          "event_end_s": 188.9676,
+          "stab_start_s": 188.9676,
+          "stab_end_s": 191.9673,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 9.616,
+          "stab_quiet_z": 2.317
+        },
+        "Trained": {
+          "event_start": 62707,
+          "event_end": 63901,
+          "stab_start": 63901,
+          "stab_end": 65012,
+          "event_start_s": 169.3089,
+          "event_end_s": 172.5327,
+          "stab_start_s": 172.5327,
+          "stab_end_s": 175.5324,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.957,
+          "stab_quiet_z": 1.581
+        }
+      }
+    }
+  ],
+  "knee_events": [
+    {
+      "event_id": "knee-01",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 25558,
+          "event_end": 26208,
+          "stab_start": 26353,
+          "stab_end": 27464,
+          "event_start_s": 69.0066,
+          "event_end_s": 70.7616,
+          "stab_start_s": 71.1531,
+          "stab_end_s": 74.1528,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 5.326,
+          "stab_quiet_z": 1.163
+        },
+        "Trained": {
+          "event_start": 18835,
+          "event_end": 19226,
+          "stab_start": 20025,
+          "stab_end": 21136,
+          "event_start_s": 50.8545,
+          "event_end_s": 51.9102,
+          "stab_start_s": 54.0675,
+          "stab_end_s": 57.0672,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.541,
+          "stab_quiet_z": 0.437
+        }
+      }
+    },
+    {
+      "event_id": "knee-02",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Trained": {
+          "event_start": 23537,
+          "event_end": 25549,
+          "stab_start": 25973,
+          "stab_end": 27084,
+          "event_start_s": 63.5499,
+          "event_end_s": 68.9823,
+          "stab_start_s": 70.1271,
+          "stab_end_s": 73.1268,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 3.895,
+          "stab_quiet_z": 2.34
+        }
+      }
+    },
+    {
+      "event_id": "knee-03",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 40481,
+          "event_end": 42203,
+          "stab_start": 42699,
+          "stab_end": 43810,
+          "event_start_s": 109.2987,
+          "event_end_s": 113.9481,
+          "stab_start_s": 115.2873,
+          "stab_end_s": 118.287,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 15.983,
+          "stab_quiet_z": 4.029
+        }
+      }
+    },
+    {
+      "event_id": "knee-04",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 53334,
+          "event_end": 55729,
+          "stab_start": 55729,
+          "stab_end": 56840,
+          "event_start_s": 144.0018,
+          "event_end_s": 150.4683,
+          "stab_start_s": 150.4683,
+          "stab_end_s": 153.468,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 5.023,
+          "stab_quiet_z": 1.082
+        },
+        "Trained": {
+          "event_start": 46527,
+          "event_end": 49106,
+          "stab_start": 49106,
+          "stab_end": 50217,
+          "event_start_s": 125.6229,
+          "event_end_s": 132.5862,
+          "stab_start_s": 132.5862,
+          "stab_end_s": 135.5859,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.708,
+          "stab_quiet_z": 0.572
+        }
+      }
+    },
+    {
+      "event_id": "knee-05",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 56603,
+          "event_end": 58420,
+          "stab_start": 58420,
+          "stab_end": 59531,
+          "event_start_s": 152.8281,
+          "event_end_s": 157.734,
+          "stab_start_s": 157.734,
+          "stab_end_s": 160.7337,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 8.457,
+          "stab_quiet_z": 2.005
+        },
+        "Trained": {
+          "event_start": 50135,
+          "event_end": 51970,
+          "stab_start": 52060,
+          "stab_end": 53171,
+          "event_start_s": 135.3645,
+          "event_end_s": 140.319,
+          "stab_start_s": 140.562,
+          "stab_end_s": 143.5617,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.484,
+          "stab_quiet_z": 0.391
+        }
+      }
+    },
+    {
+      "event_id": "knee-06",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 60089,
+          "event_end": 62768,
+          "stab_start": 62768,
+          "stab_end": 63879,
+          "event_start_s": 162.2403,
+          "event_end_s": 169.4736,
+          "stab_start_s": 169.4736,
+          "stab_end_s": 172.4733,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 5.232,
+          "stab_quiet_z": 1.138
+        },
+        "Trained": {
+          "event_start": 53348,
+          "event_end": 55006,
+          "stab_start": 55006,
+          "stab_end": 56117,
+          "event_start_s": 144.0396,
+          "event_end_s": 148.5162,
+          "stab_start_s": 148.5162,
+          "stab_end_s": 151.5159,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.588,
+          "stab_quiet_z": 1.283
+        }
+      }
+    },
+    {
+      "event_id": "knee-07",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 63514,
+          "event_end": 66026,
+          "stab_start": 66026,
+          "stab_end": 67137,
+          "event_start_s": 171.4878,
+          "event_end_s": 178.2702,
+          "stab_start_s": 178.2702,
+          "stab_end_s": 181.2699,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 6.804,
+          "stab_quiet_z": 1.561
+        },
+        "Trained": {
+          "event_start": 56830,
+          "event_end": 58996,
+          "stab_start": 59390,
+          "stab_end": 60501,
+          "event_start_s": 153.441,
+          "event_end_s": 159.2892,
+          "stab_start_s": 160.353,
+          "stab_end_s": 163.3527,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.754,
+          "stab_quiet_z": 0.609
+        }
+      }
+    },
+    {
+      "event_id": "knee-08",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Trained": {
+          "event_start": 70060,
+          "event_end": 70610,
+          "stab_start": 71058,
+          "stab_end": 72169,
+          "event_start_s": 189.162,
+          "event_end_s": 190.647,
+          "stab_start_s": 191.8566,
+          "stab_end_s": 194.8563,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.458,
+          "stab_quiet_z": 1.178
+        }
+      }
+    }
+  ],
+  "smooth_events": [
+    {
+      "event_id": "smooth-01",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 19433,
+          "event_end": 21497,
+          "event_start_s": 52.4691,
+          "event_end_s": 58.0419,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 12571,
+          "event_end": 15465,
+          "event_start_s": 33.9417,
+          "event_end_s": 41.7555,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-02",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 21497,
+          "event_end": 25576,
+          "event_start_s": 58.0419,
+          "event_end_s": 69.0552,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 15465,
+          "event_end": 18017,
+          "event_start_s": 41.7555,
+          "event_end_s": 48.6459,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-03",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 30252,
+          "event_end": 34336,
+          "event_start_s": 81.6804,
+          "event_end_s": 92.7072,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 24277,
+          "event_end": 29153,
+          "event_start_s": 65.5479,
+          "event_end_s": 78.7131,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-04",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 41306,
+          "event_end": 42797,
+          "event_start_s": 111.5262,
+          "event_end_s": 115.5519,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 34674,
+          "event_end": 36190,
+          "event_start_s": 93.6198,
+          "event_end_s": 97.713,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-05",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 42797,
+          "event_end": 44350,
+          "event_start_s": 115.5519,
+          "event_end_s": 119.745,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 36190,
+          "event_end": 37528,
+          "event_start_s": 97.713,
+          "event_end_s": 101.3256,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-06",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 44350,
+          "event_end": 45950,
+          "event_start_s": 119.745,
+          "event_end_s": 124.065,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 37528,
+          "event_end": 39077,
+          "event_start_s": 101.3256,
+          "event_end_s": 105.5079,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-07",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 48692,
+          "event_end": 50616,
+          "event_start_s": 131.4684,
+          "event_end_s": 136.6632,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 42071,
+          "event_end": 43739,
+          "event_start_s": 113.5917,
+          "event_end_s": 118.0953,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-08",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 50616,
+          "event_end": 52263,
+          "event_start_s": 136.6632,
+          "event_end_s": 141.1101,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 43739,
+          "event_end": 45499,
+          "event_start_s": 118.0953,
+          "event_end_s": 122.8473,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-09",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 66779,
+          "event_end": 69792,
+          "event_start_s": 180.3033,
+          "event_end_s": 188.4384,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 60509,
+          "event_end": 63282,
+          "event_start_s": 163.3743,
+          "event_end_s": 170.8614,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    },
+    {
+      "event_id": "smooth-10",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 69792,
+          "event_end": 70885,
+          "event_start_s": 188.4384,
+          "event_end_s": 191.3895,
+          "source": {
+            "event": "auto"
+          }
+        },
+        "Trained": {
+          "event_start": 63282,
+          "event_end": 64437,
+          "event_start_s": 170.8614,
+          "event_end_s": 173.9799,
+          "source": {
+            "event": "auto"
+          }
+        }
+      }
+    }
+  ],
+  "session_name": "v2-auto-detected"
+}

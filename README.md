@@ -356,6 +356,20 @@ puts every novice stance within 0.44 s of its trained partner. On these recordin
 the form occurs a near-constant **3.4 s later in the novice recording** throughout — both participants
 followed the same instruction video — which is itself worth knowing: tempo was paced externally.
 
+Two recordings need not cover the same stretch of the form: one may start later, or stop before the
+form ends. So the warping is done in two steps (`analysis/alignment.py`). First the straight map
+between the two clocks along which the channels correlate best is found — the offset, and the tempo
+ratio, searched between 0.8 and 1.25 — over every shift that lays at least half of the shorter
+recording over the other. Then the dynamic time warping searches a band around that line (±15 % of the
+recording), and its ends are left free over whatever part of either recording the line puts outside the
+other, plus 30 s. The band used to be centred on the diagonal from both starts to both ends, which
+assumes both recordings span the same part of the form: a novice recording (`IMUmama_testmoment1`)
+that stops 55 s before the end of the form had its single-leg stances mapped 18–36 s from their
+partners, and now within 0.2 s. On every pair that did span the same part of the form (the June pair,
+Trial_01/02/03 among themselves, a September recording against Trial_01) the map is bit-for-bit what it
+was. Every pair tried so far corresponds along a tempo ratio of 1.000 — the performances were paced by
+the same video — with offsets of 1–22 s. The line is written to `metrics_provenance.json`.
+
 Every family is paired through this map. Pairing by order, which it replaces, compared a different
 movement in all six trunk-rotation pairs of the curated session, and put the full-cycle sequence
 segments half a cycle out of step from the first one on, although both recordings had 13. Validation

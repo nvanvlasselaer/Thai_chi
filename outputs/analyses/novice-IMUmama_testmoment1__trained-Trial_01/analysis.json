@@ -1,0 +1,18 @@
+{
+  "analysis": "novice-IMUmama_testmoment1__trained-Trial_01",
+  "recordings": {
+    "Novice": {
+      "file": "IMUmama_testmoment1.csv",
+      "id": "IMUmama_testmoment1",
+      "size": 128579011,
+      "sha256": "43a3c3648944c667b85790954f0d6338bd053fe3210f1a719f2dd706eb9ac75d"
+    },
+    "Trained": {
+      "file": "Trial_01.csv",
+      "id": "Trial_01",
+      "size": 139137458,
+      "sha256": "000ac27c0c83427fb59071848bb3cd7b4719bc7a5f50e47d8a935d23db993d4e"
+    }
+  },
+  "written_utc": "2026-10-14T21:44:42+00:00"
+}

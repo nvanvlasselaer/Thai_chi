@@ -1,0 +1,253 @@
+{
+  "computed_utc": "2026-10-14T21:25:06+00:00",
+  "analysis": "novice-Trial_01__trained-Trial_03",
+  "recordings": {
+    "Novice": {
+      "file": "Trial_01.csv",
+      "id": "Trial_01",
+      "size": 139137458,
+      "sha256": "000ac27c0c83427fb59071848bb3cd7b4719bc7a5f50e47d8a935d23db993d4e"
+    },
+    "Trained": {
+      "file": "Trial_03.csv",
+      "id": "Trial_03",
+      "size": 154221894,
+      "sha256": "790d5ce951168a322863311efaaaf5b95c1bd1a82f04dfd0040dcca48ab3721d"
+    }
+  },
+  "session_name": "curated-2026-10-14",
+  "session_digest": "c11b66c71cf1513e",
+  "metrics_version": 3,
+  "ignore_high_pass_filter": false,
+  "files": [
+    "trunk_rotation_event_windows.csv",
+    "trunk_rotation_balance_metrics.csv",
+    "monopodal_stance_event_windows.csv",
+    "monopodal_stance_balance_metrics.csv",
+    "monopodal_stance_asymmetry_metrics.csv",
+    "sequence_smoothness_metrics.csv",
+    "sequence_summary.csv",
+    "paired_comparison.csv",
+    "recording_alignment.csv",
+    "trunk_traceability_figure.png",
+    "monopodal_stance_overview_figure.png",
+    "monopodal_stance_traceability_figure.png",
+    "sequence_smoothness_figure.png",
+    "centre_of_mass_figure.png",
+    "event_editor_session.json"
+  ],
+  "calibration": {
+    "Novice": {
+      "quiet_spans_s": [
+        [
+          0.0,
+          10.0
+        ],
+        [
+          175.46,
+          185.46
+        ]
+      ],
+      "gyro_bias_dps": {
+        "chestbone": [
+          2.439,
+          13.415,
+          -2.744
+        ],
+        "lfoot": [
+          3.537,
+          6.463,
+          0.427
+        ],
+        "lhand": [
+          -8.659,
+          0.976,
+          -0.671
+        ],
+        "lhumerus": [
+          8.537,
+          -0.427,
+          -3.841
+        ],
+        "lthigh": [
+          0.061,
+          0.793,
+          3.537
+        ],
+        "ltibia": [
+          1.585,
+          5.671,
+          -5.183
+        ],
+        "lulna": [
+          -10.0,
+          -2.927,
+          -5.305
+        ],
+        "lumbar": [
+          -1.707,
+          -3.598,
+          5.244
+        ],
+        "rfoot": [
+          3.537,
+          9.207,
+          0.915
+        ],
+        "rhand": [
+          7.622,
+          15.549,
+          0.183
+        ],
+        "rhumerus": [
+          3.049,
+          9.512,
+          1.098
+        ],
+        "rthigh": [
+          2.073,
+          5.488,
+          1.524
+        ],
+        "rtibia": [
+          7.805,
+          0.183,
+          -2.561
+        ],
+        "rulna": [
+          -14.451,
+          9.146,
+          -1.28
+        ]
+      },
+      "bias_start_end_difference_dps": {
+        "chestbone": 1.501,
+        "lfoot": 0.266,
+        "lhand": 6.858,
+        "lhumerus": 4.263,
+        "lthigh": 0.867,
+        "ltibia": 1.466,
+        "lulna": 6.325,
+        "lumbar": 1.434,
+        "rfoot": 0.939,
+        "rhand": 3.849,
+        "rhumerus": 7.197,
+        "rthigh": 0.572,
+        "rtibia": 1.361,
+        "rulna": 5.179
+      }
+    },
+    "Trained": {
+      "quiet_spans_s": [
+        [
+          6.17,
+          16.17
+        ],
+        [
+          216.64,
+          226.64
+        ]
+      ],
+      "gyro_bias_dps": {
+        "chestbone": [
+          2.256,
+          13.476,
+          -2.805
+        ],
+        "lfoot": [
+          3.598,
+          6.585,
+          0.427
+        ],
+        "lhand": [
+          -9.634,
+          2.134,
+          -1.189
+        ],
+        "lhumerus": [
+          8.537,
+          0.976,
+          -3.902
+        ],
+        "lthigh": [
+          0.549,
+          0.976,
+          3.598
+        ],
+        "ltibia": [
+          1.768,
+          5.793,
+          -5.244
+        ],
+        "lulna": [
+          -11.28,
+          -0.61,
+          -5.457
+        ],
+        "lumbar": [
+          -1.463,
+          -3.476,
+          5.366
+        ],
+        "rfoot": [
+          3.476,
+          9.268,
+          0.976
+        ],
+        "rhand": [
+          6.402,
+          14.085,
+          0.976
+        ],
+        "rhumerus": [
+          2.439,
+          8.902,
+          0.915
+        ],
+        "rthigh": [
+          2.439,
+          5.366,
+          1.524
+        ],
+        "rtibia": [
+          8.11,
+          0.183,
+          -2.622
+        ],
+        "rulna": [
+          -15.549,
+          7.195,
+          -0.488
+        ]
+      },
+      "bias_start_end_difference_dps": {
+        "chestbone": 0.844,
+        "lfoot": 0.106,
+        "lhand": 0.51,
+        "lhumerus": 2.294,
+        "lthigh": 0.356,
+        "ltibia": 1.263,
+        "lulna": 5.111,
+        "lumbar": 1.019,
+        "rfoot": 0.266,
+        "rhand": 11.022,
+        "rhumerus": 1.95,
+        "rthigh": 0.616,
+        "rtibia": 0.575,
+        "rulna": 5.845
+      }
+    }
+  },
+  "alignment": {
+    "digest": "1af44f2ba0253d97",
+    "median_novice_minus_trained_s": 4.8,
+    "mean_step_cost": 0.8402,
+    "params": {
+      "fs_hz": 5.0,
+      "band_frac": 0.15,
+      "yaw_cutoff_hz": 0.5,
+      "knee_cutoff_hz": 1.0,
+      "free_end_s": 30.0
+    }
+  }
+}

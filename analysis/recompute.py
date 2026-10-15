@@ -469,6 +469,9 @@ def write_provenance(session: dict, written: list[str], trials: dict[str, Loaded
                 "digest": aligned.digest(),
                 "median_novice_minus_trained_s": round(aligned.median_offset_s, 3),
                 "mean_step_cost": round(aligned.cost, 4),
+                "straight_line": {"trained_per_novice_s": round(aligned.line[0], 4),
+                                  "offset_s": round(aligned.line[1], 3),
+                                  "mean_correlation": round(aligned.line[2], 3)},
                 "params": asdict(aligned.params),
             }
     provenance_path().write_text(json.dumps(record, indent=2))

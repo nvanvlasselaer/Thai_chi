@@ -1,0 +1,18 @@
+{
+  "analysis": "novice-Trial_01__trained-Trial_03",
+  "recordings": {
+    "Novice": {
+      "file": "Trial_01.csv",
+      "id": "Trial_01",
+      "size": 139137458,
+      "sha256": "000ac27c0c83427fb59071848bb3cd7b4719bc7a5f50e47d8a935d23db993d4e"
+    },
+    "Trained": {
+      "file": "Trial_03.csv",
+      "id": "Trial_03",
+      "size": 154221894,
+      "sha256": "790d5ce951168a322863311efaaaf5b95c1bd1a82f04dfd0040dcca48ab3721d"
+    }
+  },
+  "written_utc": "2026-10-14T20:48:47+00:00"
+}

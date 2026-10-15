@@ -1,0 +1,38 @@
+{
+  "recording": {
+    "file": "Trial_03.csv",
+    "id": "Trial_03",
+    "size": 154221894,
+    "sha256": "790d5ce951168a322863311efaaaf5b95c1bd1a82f04dfd0040dcca48ab3721d"
+  },
+  "saved_utc": "2026-10-14T20:48:31+00:00",
+  "saved_local": "14 Oct 2026 22:48",
+  "sensors": {
+    "Avanti Sensor 0 (84551)": "rulna",
+    "Avanti Sensor 1 (84494)": "lhand",
+    "Avanti Sensor 2 (84625)": "lhumerus",
+    "Avanti Sensor 3 (84483)": "rhumerus",
+    "Avanti Sensor 4 (84642)": "lulna",
+    "Avanti Sensor 5 (84450)": "rhand",
+    "Avanti Sensor 7 (84663)": "chestbone",
+    "Avanti Sensor 8 (84573)": "lumbar",
+    "Avanti Sensor 9 (84570)": "rthigh",
+    "Avanti Sensor 10 (84624)": "lthigh",
+    "Avanti Sensor 11 (84492)": "rtibia",
+    "Avanti Sensor 12 (84607)": "ltibia",
+    "Avanti Sensor 13 (84643)": "rfoot",
+    "Avanti Sensor 14 (84644)": "lfoot"
+  },
+  "placements": {
+    "Avanti Sensor 0 (84551)": "frontal",
+    "Avanti Sensor 1 (84494)": "lateral",
+    "Avanti Sensor 2 (84625)": "lateral",
+    "Avanti Sensor 3 (84483)": "lateral",
+    "Avanti Sensor 4 (84642)": "frontal",
+    "Avanti Sensor 5 (84450)": "lateral",
+    "Avanti Sensor 9 (84570)": "frontal",
+    "Avanti Sensor 10 (84624)": "frontal",
+    "Avanti Sensor 11 (84492)": "frontal",
+    "Avanti Sensor 12 (84607)": "frontal"
+  }
+}

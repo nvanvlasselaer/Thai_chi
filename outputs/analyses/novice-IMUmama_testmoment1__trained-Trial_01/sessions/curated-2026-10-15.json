@@ -1,0 +1,1271 @@
+{
+  "schema_version": 2,
+  "created_utc": "2026-10-14T21:46:26+00:00",
+  "modified_utc": "2026-10-14T22:23:17+00:00",
+  "recordings": {
+    "Novice": {
+      "file": "IMUmama_testmoment1.csv",
+      "id": "IMUmama_testmoment1",
+      "size": 128579011,
+      "sha256": "43a3c3648944c667b85790954f0d6338bd053fe3210f1a719f2dd706eb9ac75d"
+    },
+    "Trained": {
+      "file": "Trial_01.csv",
+      "id": "Trial_01",
+      "size": 139137458,
+      "sha256": "000ac27c0c83427fb59071848bb3cd7b4719bc7a5f50e47d8a935d23db993d4e"
+    }
+  },
+  "fs": {
+    "Novice": 370.3704,
+    "Trained": 370.3704
+  },
+  "n_samples": {
+    "Novice": 71760,
+    "Trained": 85325
+  },
+  "ignore_high_pass_filter": false,
+  "metrics_version": 3,
+  "detector": {
+    "trunk_n_events": 6,
+    "trunk_rel_threshold": 0.15,
+    "trunk_floor_percentile": 40.0,
+    "trunk_peak_percentile": 90.0,
+    "trunk_peak_separation_s": 2.0,
+    "trunk_min_duration_s": 1.5,
+    "trunk_max_duration_s": 20.0,
+    "trunk_min_excursion_deg": 8.0,
+    "trunk_envelope_cutoff_hz": 1.5,
+    "trunk_yaw_cutoff_hz": 4.0,
+    "knee_method": "lift",
+    "knee_lift_min_peak": 0.25,
+    "knee_lift_rel_threshold": 0.15,
+    "knee_lift_min_duration_s": 0.5,
+    "knee_threshold_deg": 60.0,
+    "knee_min_duration_s": 0.4,
+    "knee_merge_gap_s": 0.2,
+    "smooth_yaw_cutoff_hz": 0.5,
+    "smooth_min_lobe_deg": 10.0,
+    "smooth_min_lobe_separation_s": 1.5,
+    "smooth_min_excursion_deg": 10.0,
+    "smooth_min_duration_s": 1.0,
+    "smooth_max_duration_s": 15.0,
+    "stab_min_duration_s": 3.0,
+    "stab_horizon_s": 10.0,
+    "stab_latency_weight": 0.65,
+    "stab_baseline_percentile": 20.0,
+    "stab_scale_percentile": 50.0,
+    "stab_low_confidence_z": 1.0,
+    "stab_omega_cutoff_hz": 4.0
+  },
+  "lag_pad_s": 2.0,
+  "knee_lag_window_s": [
+    2.0,
+    3.0
+  ],
+  "trunk_events": [
+    {
+      "event_id": "trunk-01",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 20202,
+          "event_end": 20791,
+          "stab_start": 20791,
+          "stab_end": 21902,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 2.846,
+          "stab_quiet_z": 0.496,
+          "event_start_s": 54.5454,
+          "event_end_s": 56.1357,
+          "stab_start_s": 56.1357,
+          "stab_end_s": 59.1354
+        },
+        "Trained": {
+          "event_start": 12810,
+          "event_end": 14311,
+          "stab_start": 14311,
+          "stab_end": 15422,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 0.68,
+          "stab_quiet_z": -0.258,
+          "event_start_s": 34.587,
+          "event_end_s": 38.6397,
+          "stab_start_s": 38.6397,
+          "stab_end_s": 41.6394
+        }
+      },
+      "pair_label": "A",
+      "curation": "[A] detected in neither recording as a pair; novice = walk-out of its fast twist (54.5-56.1 s, slow creep before and after excluded, as on the trained side); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, kept (3 s, no next movement inside) (novice quiet, trained quiet)"
+    },
+    {
+      "event_id": "trunk-02",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 22707,
+          "event_end": 24372,
+          "stab_start": 24372,
+          "stab_end": 25483,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 2.689,
+          "stab_quiet_z": 0.454,
+          "event_start_s": 61.3089,
+          "event_end_s": 65.8044,
+          "stab_start_s": 65.8044,
+          "stab_end_s": 68.8041
+        },
+        "Trained": {
+          "event_start": 15940,
+          "event_end": 17112,
+          "stab_start": 17112,
+          "stab_end": 18223,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 1.048,
+          "stab_quiet_z": 0.038,
+          "event_start_s": 43.038,
+          "event_end_s": 46.2024,
+          "stab_start_s": 46.2024,
+          "stab_end_s": 49.2021
+        }
+      },
+      "pair_label": "B",
+      "curation": "[B] novice = detector candidate (paired by the detector once the alignment is corrected); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, kept (3 s, no next movement inside) (novice quiet, trained quiet)"
+    },
+    {
+      "event_id": "trunk-03",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 25918,
+          "event_end": 26749,
+          "stab_start": 26749,
+          "stab_end": 27238,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 2.18,
+          "stab_quiet_z": 0.317,
+          "event_start_s": 69.9786,
+          "event_end_s": 72.2223,
+          "stab_start_s": 72.2223,
+          "stab_end_s": 73.5426
+        },
+        "Trained": {
+          "event_start": 19188,
+          "event_end": 20035,
+          "stab_start": 20035,
+          "stab_end": 21146,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 1.521,
+          "stab_quiet_z": 0.421,
+          "event_start_s": 51.8076,
+          "event_end_s": 54.0945,
+          "stab_start_s": 54.0945,
+          "stab_end_s": 57.0942
+        }
+      },
+      "pair_label": "T1",
+      "curation": "[T1] novice = detector candidate; both rotate right after the same right-foot step; trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, shortened to the pause before the next movement (novice pause, trained quiet)"
+    },
+    {
+      "event_id": "trunk-04",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 28336,
+          "event_end": 30444,
+          "stab_start": 30444,
+          "stab_end": 31277,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 2.805,
+          "stab_quiet_z": 0.485,
+          "event_start_s": 76.5072,
+          "event_end_s": 82.1988,
+          "stab_start_s": 82.1988,
+          "stab_end_s": 84.4479
+        },
+        "Trained": {
+          "event_start": 22323,
+          "event_end": 24122,
+          "stab_start": 24122,
+          "stab_end": 25233,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 1.948,
+          "stab_quiet_z": 0.766,
+          "event_start_s": 60.2721,
+          "event_end_s": 65.1294,
+          "stab_start_s": 65.1294,
+          "stab_end_s": 68.1291
+        }
+      },
+      "pair_label": "C",
+      "curation": "[C] staged in both; trained window = its second stage (as curated before), novice = its matching stages 2-3 (fast rise at 76.5-78 s, then humps); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, shortened to the pause before the next movement (novice pause, trained quiet)"
+    },
+    {
+      "event_id": "trunk-05",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 34524,
+          "event_end": 35694,
+          "stab_start": 35694,
+          "stab_end": 36805,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 19.796,
+          "stab_quiet_z": 5.054,
+          "event_start_s": 93.2148,
+          "event_end_s": 96.3738,
+          "stab_start_s": 96.3738,
+          "stab_end_s": 99.3735
+        },
+        "Trained": {
+          "event_start": 28386,
+          "event_end": 30012,
+          "stab_start": 30012,
+          "stab_end": 31123,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 3.86,
+          "stab_quiet_z": 2.311,
+          "event_start_s": 76.6422,
+          "event_end_s": 81.0324,
+          "stab_start_s": 81.0324,
+          "stab_end_s": 84.0321
+        }
+      },
+      "pair_label": "E",
+      "curation": "[E] slow staged rise in both; novice from its turning point to the walk-out end of the rise (its chest turns only afterwards); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice pause, trained flows on)"
+    },
+    {
+      "event_id": "trunk-06",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 39415,
+          "event_end": 40516,
+          "stab_start": 40516,
+          "stab_end": 41627,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 10.13,
+          "stab_quiet_z": 2.455,
+          "event_start_s": 106.4205,
+          "event_end_s": 109.3932,
+          "stab_start_s": 109.3932,
+          "stab_end_s": 112.3929
+        },
+        "Trained": {
+          "event_start": 32968,
+          "event_end": 34252,
+          "stab_start": 34252,
+          "stab_end": 35363,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 4.605,
+          "stab_quiet_z": 2.913,
+          "event_start_s": 89.0136,
+          "event_end_s": 92.4804,
+          "stab_start_s": 92.4804,
+          "stab_end_s": 95.4801
+        }
+      },
+      "pair_label": "T2",
+      "curation": "[T2] two stages in both (small first twist, then the main one); novice from the walk-out start of its first stage to the walk-out end of its second; trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice pause, trained flows on)"
+    },
+    {
+      "event_id": "trunk-07",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 41257,
+          "event_end": 42763,
+          "stab_start": 42763,
+          "stab_end": 43874,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 16.529,
+          "stab_quiet_z": 4.176,
+          "event_start_s": 111.3939,
+          "event_end_s": 115.4601,
+          "stab_start_s": 115.4601,
+          "stab_end_s": 118.4598
+        },
+        "Trained": {
+          "event_start": 34746,
+          "event_end": 36205,
+          "stab_start": 36205,
+          "stab_end": 37316,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 5.603,
+          "stab_quiet_z": 3.72,
+          "event_start_s": 93.8142,
+          "event_end_s": 97.7535,
+          "stab_start_s": 97.7535,
+          "stab_end_s": 100.7532
+        }
+      },
+      "pair_label": "T3",
+      "curation": "[T3] novice = walk-out of its rise, ending at its yaw turning point; trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice quiet, trained flows on)"
+    },
+    {
+      "event_id": "trunk-08",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 42762,
+          "event_end": 43652,
+          "stab_start": 43652,
+          "stab_end": 44763,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 12.64,
+          "stab_quiet_z": 3.13,
+          "event_start_s": 115.4574,
+          "event_end_s": 117.8604,
+          "stab_start_s": 117.8604,
+          "stab_end_s": 120.8601
+        },
+        "Trained": {
+          "event_start": 36283,
+          "event_end": 37640,
+          "stab_start": 37640,
+          "stab_end": 38751,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 3.818,
+          "stab_quiet_z": 2.277,
+          "event_start_s": 97.9641,
+          "event_end_s": 101.628,
+          "stab_start_s": 101.628,
+          "stab_end_s": 104.6277
+        }
+      },
+      "pair_label": "F",
+      "curation": "[F] novice from its yaw turning point to the walk-out end of its fall (faster than the trained); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice pause, trained flows on)"
+    },
+    {
+      "event_id": "trunk-09",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 44344,
+          "event_end": 45606,
+          "stab_start": 45606,
+          "stab_end": 46717,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 6.138,
+          "stab_quiet_z": 1.382,
+          "event_start_s": 119.7288,
+          "event_end_s": 123.1362,
+          "stab_start_s": 123.1362,
+          "stab_end_s": 126.1359
+        },
+        "Trained": {
+          "event_start": 37640,
+          "event_end": 39110,
+          "stab_start": 39110,
+          "stab_end": 40221,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 5.477,
+          "stab_quiet_z": 3.618,
+          "event_start_s": 101.628,
+          "event_end_s": 105.597,
+          "stab_start_s": 105.597,
+          "stab_end_s": 108.5967
+        }
+      },
+      "pair_label": "G",
+      "curation": "[G] novice from the start of its rise (after a small back-and-forth that has no counterpart) to its turning point; trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice flows on, trained flows on)"
+    },
+    {
+      "event_id": "trunk-10",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 45606,
+          "event_end": 47120,
+          "stab_start": 47120,
+          "stab_end": 48231,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 8.686,
+          "stab_quiet_z": 2.067,
+          "event_start_s": 123.1362,
+          "event_end_s": 127.224,
+          "stab_start_s": 127.224,
+          "stab_end_s": 130.2237
+        },
+        "Trained": {
+          "event_start": 39110,
+          "event_end": 40093,
+          "stab_start": 40093,
+          "stab_end": 41204,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 3.208,
+          "stab_quiet_z": 1.784,
+          "event_start_s": 105.597,
+          "event_end_s": 108.2511,
+          "stab_start_s": 108.2511,
+          "stab_end_s": 111.2508
+        }
+      },
+      "pair_label": "H",
+      "curation": "[H] novice turning point to turning point (a gradual fall in humps); trained window reused from the Trial_01 vs Trial_03 curation; stabilization from the end of the rotation in both, accepted with movement: the next movement starts < 1 s after the rotation (novice flows on, trained pause)"
+    },
+    {
+      "event_id": "trunk-11",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 47343,
+          "event_end": 48596,
+          "stab_start": 48596,
+          "stab_end": 49707,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 12.99,
+          "stab_quiet_z": 3.224,
+          "event_start_s": 127.8261,
+          "event_end_s": 131.2092,
+          "stab_start_s": 131.2092,
+          "stab_end_s": 134.2089
+        },
+        "Trained": {
+          "event_start": 40861,
+          "event_end": 42275,
+          "stab_start": 42275,
+          "stab_end": 43042,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 3.703,
+          "stab_quiet_z": 2.184,
+          "event_start_s": 110.3247,
+          "event_end_s": 114.1425,
+          "stab_start_s": 114.1425,
+          "stab_end_s": 116.2134
+        }
+      },
+      "pair_label": "I",
+      "curation": "[I] new pair (no partner in the dual-task trial): trained = detector candidate start to its yaw turning point (the rise only), novice = detector candidate; stabilization from the end of the rotation in both, shortened to the pause before the next movement (novice quiet, trained pause)"
+    },
+    {
+      "event_id": "trunk-12",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 69630,
+          "event_end": 70682,
+          "stab_start": 70682,
+          "stab_end": 71169,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 7.486,
+          "stab_quiet_z": 1.744,
+          "event_start_s": 188.001,
+          "event_end_s": 190.8414,
+          "stab_start_s": 190.8414,
+          "stab_end_s": 192.1563
+        },
+        "Trained": {
+          "event_start": 63263,
+          "event_end": 64344,
+          "stab_start": 64344,
+          "stab_end": 65455,
+          "source": {
+            "event": "manual",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 2.668,
+          "stab_quiet_z": 1.348,
+          "event_start_s": 170.8101,
+          "event_end_s": 173.7288,
+          "stab_start_s": 173.7288,
+          "stab_end_s": 176.7285
+        }
+      },
+      "pair_label": "K",
+      "curation": "[K] new pair: the fall at the end of the novice recording; trained turning point to turning point (two stages), novice from the start of its small first stage to its turning point; stabilization from the end of the rotation in both, shortened to the pause before the next movement (novice pause, trained quiet)"
+    }
+  ],
+  "knee_events": [
+    {
+      "event_id": "knee-01",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 25558,
+          "event_end": 26208,
+          "stab_start": 26749,
+          "stab_end": 27860,
+          "event_start_s": 69.0066,
+          "event_end_s": 70.7616,
+          "stab_start_s": 72.2223,
+          "stab_end_s": 75.222,
+          "source": {
+            "event": "auto",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 3.74,
+          "stab_quiet_z": 0.737
+        },
+        "Trained": {
+          "event_start": 18835,
+          "event_end": 19226,
+          "stab_start": 20025,
+          "stab_end": 21136,
+          "event_start_s": 50.8545,
+          "event_end_s": 51.9102,
+          "stab_start_s": 54.0675,
+          "stab_end_s": 57.0672,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.541,
+          "stab_quiet_z": 0.437
+        }
+      },
+      "curation": "paired right step (the novice lifts the foot twice: a hesitant step); novice settling window moved to start at the end of the trunk rotation that overlaps the step (as in the trained, whose window starts after that rotation)"
+    },
+    {
+      "event_id": "knee-02",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": false,
+      "windows": {
+        "Trained": {
+          "event_start": 23537,
+          "event_end": 25549,
+          "stab_start": 25973,
+          "stab_end": 27084,
+          "event_start_s": 63.5499,
+          "event_end_s": 68.9823,
+          "stab_start_s": 70.1271,
+          "stab_end_s": 73.1268,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 3.895,
+          "stab_quiet_z": 2.34
+        }
+      },
+      "curation": "off: Trial_01 toe stance (heel up, hip barely flexed), not a lift"
+    },
+    {
+      "event_id": "knee-03",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": false,
+      "windows": {
+        "Novice": {
+          "event_start": 40481,
+          "event_end": 42203,
+          "stab_start": 42699,
+          "stab_end": 43810,
+          "event_start_s": 109.2987,
+          "event_end_s": 113.9481,
+          "stab_start_s": 115.2873,
+          "stab_end_s": 118.287,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 15.983,
+          "stab_quiet_z": 4.029
+        }
+      },
+      "curation": "off: novice lunges onto the right leg with the left heel raised (weight index 0.55-0.65, left hip 0-5 deg): a toe stance, not a lift"
+    },
+    {
+      "event_id": "knee-04",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 53334,
+          "event_end": 55729,
+          "stab_start": 55729,
+          "stab_end": 56603,
+          "event_start_s": 144.0018,
+          "event_end_s": 150.4683,
+          "stab_start_s": 150.4683,
+          "stab_end_s": 152.8281,
+          "source": {
+            "event": "auto",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 4.537,
+          "stab_quiet_z": 0.951
+        },
+        "Trained": {
+          "event_start": 46527,
+          "event_end": 49106,
+          "stab_start": 49106,
+          "stab_end": 50135,
+          "event_start_s": 125.6229,
+          "event_end_s": 132.5862,
+          "stab_start_s": 132.5862,
+          "stab_end_s": 135.3645,
+          "source": {
+            "event": "auto",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 1.564,
+          "stab_quiet_z": 0.456
+        }
+      },
+      "curation": "paired left knee lift; novice settling window shortened to end at the next lift-off",
+      "movement": "knee lift"
+    },
+    {
+      "event_id": "knee-05",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 56603,
+          "event_end": 58420,
+          "stab_start": 58420,
+          "stab_end": 59531,
+          "event_start_s": 152.8281,
+          "event_end_s": 157.734,
+          "stab_start_s": 157.734,
+          "stab_end_s": 160.7337,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 8.457,
+          "stab_quiet_z": 2.005
+        },
+        "Trained": {
+          "event_start": 50135,
+          "event_end": 51970,
+          "stab_start": 52060,
+          "stab_end": 53171,
+          "event_start_s": 135.3645,
+          "event_end_s": 140.319,
+          "stab_start_s": 140.562,
+          "stab_end_s": 143.5617,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.484,
+          "stab_quiet_z": 0.391
+        }
+      },
+      "curation": "paired right knee lift",
+      "movement": "knee lift"
+    },
+    {
+      "event_id": "knee-06",
+      "lifted_leg": "Left",
+      "stance_leg": "Right",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 60089,
+          "event_end": 62768,
+          "stab_start": 62768,
+          "stab_end": 63514,
+          "event_start_s": 162.2403,
+          "event_end_s": 169.4736,
+          "stab_start_s": 169.4736,
+          "stab_end_s": 171.4878,
+          "source": {
+            "event": "auto",
+            "stab": "manual"
+          },
+          "stab_quiet_ratio": 5.451,
+          "stab_quiet_z": 1.197
+        },
+        "Trained": {
+          "event_start": 53348,
+          "event_end": 55006,
+          "stab_start": 55006,
+          "stab_end": 56117,
+          "event_start_s": 144.0396,
+          "event_end_s": 148.5162,
+          "stab_start_s": 148.5162,
+          "stab_end_s": 151.5159,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.588,
+          "stab_quiet_z": 1.283
+        }
+      },
+      "curation": "paired left kick (the novice re-bends the knee after the kick and lowers slowly); novice settling window shortened to end at the next lift-off",
+      "movement": "kick"
+    },
+    {
+      "event_id": "knee-07",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": true,
+      "windows": {
+        "Novice": {
+          "event_start": 63514,
+          "event_end": 66026,
+          "stab_start": 66026,
+          "stab_end": 67137,
+          "event_start_s": 171.4878,
+          "event_end_s": 178.2702,
+          "stab_start_s": 178.2702,
+          "stab_end_s": 181.2699,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 6.804,
+          "stab_quiet_z": 1.561
+        },
+        "Trained": {
+          "event_start": 56830,
+          "event_end": 58996,
+          "stab_start": 59390,
+          "stab_end": 60501,
+          "event_start_s": 153.441,
+          "event_end_s": 159.2892,
+          "stab_start_s": 160.353,
+          "stab_end_s": 163.3527,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 1.754,
+          "stab_quiet_z": 0.609
+        }
+      },
+      "curation": "paired right kick (the novice re-bends before lowering)",
+      "movement": "kick"
+    },
+    {
+      "event_id": "knee-08",
+      "lifted_leg": "Right",
+      "stance_leg": "Left",
+      "enabled": false,
+      "windows": {
+        "Trained": {
+          "event_start": 70060,
+          "event_end": 70610,
+          "stab_start": 71058,
+          "stab_end": 72169,
+          "event_start_s": 189.162,
+          "event_end_s": 190.647,
+          "stab_start_s": 191.8566,
+          "stab_end_s": 194.8563,
+          "source": {
+            "event": "auto",
+            "stab": "auto"
+          },
+          "stab_quiet_ratio": 2.458,
+          "stab_quiet_z": 1.178
+        }
+      },
+      "curation": "off: Trial_01 step after the end of the novice recording (no partner possible)"
+    }
+  ],
+  "smooth_events": [
+    {
+      "event_id": "smooth-01",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 20071,
+          "event_end": 21497,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 54.1917,
+          "event_end_s": 58.0419
+        },
+        "Trained": {
+          "event_start": 12571,
+          "event_end": 15465,
+          "event_start_s": 33.9417,
+          "event_end_s": 41.7555,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "novice start trimmed: a still hold of 1.7 s"
+    },
+    {
+      "event_id": "smooth-02",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 22660,
+          "event_end": 25576,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 61.182,
+          "event_end_s": 69.0552
+        },
+        "Trained": {
+          "event_start": 15465,
+          "event_end": 17308,
+          "event_start_s": 41.7555,
+          "event_end_s": 46.7316,
+          "source": {
+            "event": "manual"
+          }
+        }
+      },
+      "curation": "novice start trimmed: a still hold of 3.2 s; trained end trimmed as curated before"
+    },
+    {
+      "event_id": "smooth-03",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 25576,
+          "event_end": 27142,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 69.0552,
+          "event_end_s": 73.2834
+        },
+        "Trained": {
+          "event_start": 18017,
+          "event_end": 20303,
+          "event_start_s": 48.6459,
+          "event_end_s": 54.8181,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "novice ends at its first arrival at the minimum: its 3 s wiggle near -50 deg that follows corresponds to the trained slow creep at the start of the next turn, so both are left out of both turns"
+    },
+    {
+      "event_id": "smooth-04",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 28314,
+          "event_end": 30252,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 76.4478,
+          "event_end_s": 81.6804
+        },
+        "Trained": {
+          "event_start": 21715,
+          "event_end": 24277,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 58.6305,
+          "event_end_s": 65.5479
+        }
+      },
+      "curation": "trained start moved from 54.82 s to 58.62 s, where its real rise begins: its slow creep before corresponds to the novice wiggle (see the previous turn)"
+    },
+    {
+      "event_id": "smooth-05",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 31340,
+          "event_end": 34336,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 84.618,
+          "event_end_s": 92.7072
+        },
+        "Trained": {
+          "event_start": 24277,
+          "event_end": 28176,
+          "event_start_s": 65.5479,
+          "event_end_s": 76.0752,
+          "source": {
+            "event": "manual"
+          }
+        }
+      },
+      "curation": "novice start trimmed: a still hold of 2.9 s; trained end trimmed as curated before"
+    },
+    {
+      "event_id": "smooth-06",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 35669,
+          "event_end": 37990,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 96.3063,
+          "event_end_s": 102.573
+        },
+        "Trained": {
+          "event_start": 29153,
+          "event_end": 30291,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 78.7131,
+          "event_end_s": 81.7857
+        }
+      },
+      "curation": "novice starts at 96.3 s where its real rise begins (92.7-96.3 s corresponds to the trained hold before its rise); the reversal inside the novice rise stays in the turn"
+    },
+    {
+      "event_id": "smooth-07",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 38970,
+          "event_end": 41306,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 105.219,
+          "event_end_s": 111.5262
+        },
+        "Trained": {
+          "event_start": 32721,
+          "event_end": 34674,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 88.3467,
+          "event_end_s": 93.6198
+        }
+      },
+      "curation": "both start at the end of their hold at the turn (novice 102.6-105.2 s, trained 81.8-88.3 s)"
+    },
+    {
+      "event_id": "smooth-08",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 41306,
+          "event_end": 42797,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 111.5262,
+          "event_end_s": 115.5519
+        },
+        "Trained": {
+          "event_start": 34674,
+          "event_end": 36190,
+          "event_start_s": 93.6198,
+          "event_end_s": 97.713,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-09",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 42797,
+          "event_end": 44350,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 115.5519,
+          "event_end_s": 119.745
+        },
+        "Trained": {
+          "event_start": 36190,
+          "event_end": 37528,
+          "event_start_s": 97.713,
+          "event_end_s": 101.3256,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-10",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 44350,
+          "event_end": 45356,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 119.745,
+          "event_end_s": 122.4612
+        },
+        "Trained": {
+          "event_start": 37528,
+          "event_end": 39077,
+          "event_start_s": 101.3256,
+          "event_end_s": 105.5079,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "novice end trimmed: a still hold of 1.6 s"
+    },
+    {
+      "event_id": "smooth-11",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 45950,
+          "event_end": 47320,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 124.065,
+          "event_end_s": 127.764
+        },
+        "Trained": {
+          "event_start": 39077,
+          "event_end": 40298,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 105.5079,
+          "event_end_s": 108.8046
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-12",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 47320,
+          "event_end": 48692,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 127.764,
+          "event_end_s": 131.4684
+        },
+        "Trained": {
+          "event_start": 40298,
+          "event_end": 42071,
+          "source": {
+            "event": "manual"
+          },
+          "event_start_s": 108.8046,
+          "event_end_s": 113.5917
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-13",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 48692,
+          "event_end": 50616,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 131.4684,
+          "event_end_s": 136.6632
+        },
+        "Trained": {
+          "event_start": 42071,
+          "event_end": 43739,
+          "event_start_s": 113.5917,
+          "event_end_s": 118.0953,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-14",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 50616,
+          "event_end": 52263,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 136.6632,
+          "event_end_s": 141.1101
+        },
+        "Trained": {
+          "event_start": 43739,
+          "event_end": 45499,
+          "event_start_s": 118.0953,
+          "event_end_s": 122.8473,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "turning point to turning point"
+    },
+    {
+      "event_id": "smooth-15",
+      "enabled": true,
+      "direction": 1,
+      "windows": {
+        "Novice": {
+          "event_start": 66779,
+          "event_end": 69792,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 180.3033,
+          "event_end_s": 188.4384
+        },
+        "Trained": {
+          "event_start": 60509,
+          "event_end": 63282,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 163.3743,
+          "event_end_s": 170.8614
+        }
+      },
+      "curation": "turning point to turning point in both (a new pair: no partner in the dual-task trial)"
+    },
+    {
+      "event_id": "smooth-16",
+      "enabled": true,
+      "direction": -1,
+      "windows": {
+        "Novice": {
+          "event_start": 69792,
+          "event_end": 70885,
+          "source": {
+            "event": "auto"
+          },
+          "event_start_s": 188.4384,
+          "event_end_s": 191.3895
+        },
+        "Trained": {
+          "event_start": 63282,
+          "event_end": 64437,
+          "event_start_s": 170.8614,
+          "event_end_s": 173.9799,
+          "source": {
+            "event": "auto"
+          }
+        }
+      },
+      "curation": "turning point to turning point"
+    }
+  ],
+  "trash": [],
+  "curation": {
+    "curated_utc": "2026-10-14T22:00:21+00:00",
+    "roles": {
+      "Novice": "IMUmama_testmoment1.csv (10 Sept 2026): the participant as a true novice",
+      "Trained": "Trial_01.csv (13 Oct 2026): the same participant after 3 weeks of training"
+    },
+    "sensor_names": "data/labels-placement.csv for both recordings (left/right verified on the data for both; the mirrored serial-history names fail the checks on IMUmama_testmoment1)",
+    "automatic_detection": "sessions/v2-auto-detected.json (the v2 detectors with the fixed alignment)",
+    "alignment": "pairs made through the whole-recording alignment; the novice recording stops ~55 s before the end of the form, which the alignment handles since 2026-10-15 (straight-line pre-alignment, then DTW around it, ends free over what the line puts outside the other recording): trained = 1.000 x novice -17.8 s, all four single-leg stances within 0.2 s",
+    "rules": {
+      "trunk": "pairs = the same rotation of the form in both recordings (alignment + trunk-pelvis and chest yaw); boundaries by the detector rule (walk-out to max(15 % of peak, floor) of the yaw-speed envelope), cut at a yaw turning point where the walk-out runs into the return, and spanning both stages where one recording turns in two stages that the other turns in one",
+      "trunk_stabilization": "starts at the end of the rotation in both recordings; next movement = earliest of the next yaw-speed hump (>= 10 deg/s from the floor), the next event, or a foot movement (|lift| > 0.15); per pair: no movement inside -> 3 s kept; both pause >= 1 s -> each shortened to its pause; otherwise 3 s accepted with movement",
+      "stance": "kept the detector windows (lift index); only sustained or paired single-leg supports enabled; single-sided steps, toe stances and lifts switched off with a note; stabilization from the detector search, never into the next lift-off",
+      "turns": "detected turns kept (turning point to turning point); four turns added where the detector lost matched turning points; a still hold of more than 1 s at a turn end trimmed off (15 % of peak turning rate)"
+    },
+    "trained_windows": "Trial_01 windows reused from the Trial_01 vs Trial_03 curation wherever the movement is the same; new where this pairing needs it (trunk I and K, the turn 163.4-170.9 s, the start of the turn at 58.6 s)"
+  },
+  "session_name": "curated-2026-10-15"
+}

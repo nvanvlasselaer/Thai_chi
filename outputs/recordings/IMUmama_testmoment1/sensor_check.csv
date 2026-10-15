@@ -1,0 +1,15 @@
+sensor,recorded_as,segment,placement,mounting_tilt_deg,gravity_at_rest_g,gyro_bias_dps,still_rms_dps,still_robust_z,knee,knee_flexion_axis_offset_deg,allowed_direction_pct,missing_values,status,notes
+chestbone,Avanti Sensor 7 (84663),Thorax,frontal,11.4,1.013,14.85,1.14,0.2,,,,0,ok,
+lumbar,Avanti Sensor 8 (84573),Pelvis/Lower Trunk Proxy,dorsal,20.4,0.986,6.92,0.56,-0.6,,,,0,ok,
+lthigh,Avanti Sensor 10 (84624),Left Thigh,frontal,10.5,1.02,3.76,0.87,-0.2,,,100.0,0,ok,
+rthigh,Avanti Sensor 9 (84570),Right Thigh,frontal,11.7,1.023,6.1,0.87,-0.2,,,100.0,0,ok,
+ltibia,Avanti Sensor 12 (84607),Left Shank,frontal,15.6,1.027,8.24,0.64,-0.5,left knee,45.7,100.0,0,check,"the left knee flexes 46 deg away from the assumed axis: a thigh or shank sensor is rotated on the leg, or its placement (lateral, frontal, dorsal) is not where it sat"
+rtibia,Avanti Sensor 11 (84492),Right Shank,frontal,17.1,1.022,8.6,0.74,-0.3,right knee,25.8,100.0,0,ok,right knee flexion axis 26 deg from x: part of the flexion shows in the other components (a functional calibration would remove it)
+lfoot,Avanti Sensor 14 (84644),Left Foot,,28.2,0.958,7.6,0.25,-1.0,,,,0,ok,
+rfoot,Avanti Sensor 13 (84643),Right Foot,,30.1,0.976,10.3,0.25,-1.0,,,,0,ok,
+lhumerus,Avanti Sensor 2 (84625),Left Upper Arm,lateral,2.0,1.009,9.15,1.59,0.8,,,,0,ok,
+rhumerus,Avanti Sensor 3 (84483),Right Upper Arm,lateral,5.1,1.012,10.78,4.06,4.0,,,,0,check,"moves 4.0x as much as the typical sensor while the participant stands still: loose, or that segment moved"
+lulna,Avanti Sensor 4 (84642),Left Forearm,frontal,15.1,0.999,12.72,2.07,1.4,,,,0,ok,
+rulna,Avanti Sensor 0 (84551),Right Forearm,frontal,11.3,1.001,18.06,4.58,4.7,,,,0,check,"moves 4.6x as much as the typical sensor while the participant stands still: loose, or that segment moved"
+lhand,Avanti Sensor 1 (84494),Left Hand,lateral,24.5,0.987,9.79,1.44,0.6,,,,0,ok,
+rhand,Avanti Sensor 5 (84450),Right Hand,lateral,11.5,1.006,17.52,2.06,1.4,,,,0,ok,
